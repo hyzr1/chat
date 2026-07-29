@@ -1,0 +1,31 @@
+# Dependencies and framework output
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Local configuration and credentials
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Runtime and verification artifacts
+.artifacts/
+test-results/
+playwright-report/
+.vmx-dev.log
+*.log
+*.tsbuildinfo
+docs/vmx-workspace.png
+
+# Local assistant/editor state
+.claude/
+.codex/
+.vscode/
+.idea/
+
+# Operating-system files
+.DS_Store
+Thumbs.db
