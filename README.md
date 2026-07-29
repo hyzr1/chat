@@ -15,7 +15,10 @@ Hyzr Chat is the conversational workspace in the Hyzr product family.
 | Hyzr | Product home | `hyzr.ai` |
 | Hyzr Chat | Multi-model building and orchestration | `chat.hyzr.ai` |
 | Hyzr Code | Programming and interview learning | `code.hyzr.ai` |
-| Hyzr Trade | Trading automation | `trade.hyzr.ai` |
+| Hyzr Shop | Visual storefront building | `shop.hyzr.ai` |
+| Hyzr Trade | Disclosure research and market comparison | `trade.hyzr.ai` |
+| Hyzr GL | Typed browser graphics | `gl.hyzr.ai` |
+| Hyzr UI | React component foundation | `ui.hyzr.ai` |
 
 The former VMX repository remains a private historical archive. This repository starts with clean history and keeps compatibility only where it protects existing local data and configuration.
 
@@ -78,7 +81,7 @@ If Hyzr Chat finds the former `~/.vmx` or `~/vmx-workspaces` directories, it con
 
 ## Security boundary
 
-Hyzr Chat is currently private, local-first developer infrastructure. It can execute coding tools with file and command access inside project workspaces. Run it on a trusted machine or private network, configure `HYZR_CHAT_ACCESS_TOKEN` before connecting another device, and review the evidence and final diff before merging generated work.
+Hyzr Chat is local-first developer infrastructure. It can execute coding tools with file and command access inside project workspaces. Run it on a trusted machine or private network, configure `HYZR_CHAT_ACCESS_TOKEN` before connecting another device, and review the evidence and final diff before merging generated work.
 
 See [SECURITY.md](SECURITY.md) for the complete boundary.
 
