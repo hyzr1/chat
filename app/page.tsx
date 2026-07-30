@@ -601,6 +601,8 @@ export default function Home() {
   const [account, setAccount] = useState<{ name: string; email: string } | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [incognito, setIncognito] = useState(false);
+  const [showPair, setShowPair] = useState(false);
+  const [pairInfo, setPairInfo] = useState<{ lanUrl: string; port: string; protected: boolean; code?: string; host?: string } | null>(null);
   const signedIn = account !== null;
   const [toast, setToast] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -1058,12 +1060,14 @@ export default function Home() {
     if (signedIn) { action(); return; }
     setShowLogin(true);
   }
-  // Placeholder for the pairing flow — the real Windows agent download and
-  // device pairing land in a later phase. For now, take signed-in users to
-  // Agent so the pairing surface is one step away.
+  // Open the pairing sheet and load this machine's LAN address + code so a
+  // phone on the same network can pair and drive workspaces on this PC.
   function openPair() {
-    switchWorkMode("code");
-    setToast("Windows pairer — coming soon");
+    setShowPair(true);
+    fetch("/api/access/pair", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((info) => info && setPairInfo(info))
+      .catch(() => {});
   }
   function signIn(provider: string, email?: string) {
     const nextEmail = email?.trim() || `${provider.toLowerCase()}@hyzr.ai`;
@@ -2323,6 +2327,68 @@ export default function Home() {
               <button type="submit">Continue with email</button>
             </form>
             <small>By continuing you agree to the Terms and Privacy Policy.</small>
+          </div>
+        </div>
+      )}
+
+      {showPair && (
+        <div className="login-overlay pair-overlay" onClick={() => setShowPair(false)}>
+          <div className="pair-sheet" onClick={(e) => e.stopPropagation()}>
+            <button className="login-close" onClick={() => setShowPair(false)} aria-label="Close"><IconX size={16} /></button>
+            <div className="pair-sheet-head">
+              <span className="pair-sheet-mark"><IconWindows size={20} /></span>
+              <div>
+                <h2>Pair a device</h2>
+                <p>Build from your phone. Work runs in an isolated workspace on this machine{pairInfo?.host ? ` (${pairInfo.host})` : ""}.</p>
+              </div>
+            </div>
+
+            <div className="pair-steps">
+              <div className="pair-step">
+                <span className="pair-step-n">1</span>
+                <div>
+                  <b>Open Hyzr on your phone</b>
+                  <span>On the same Wi‑Fi, visit this address:</span>
+                  <div className="pair-field">
+                    <code>{pairInfo?.lanUrl || "Detecting your network…"}</code>
+                    {pairInfo?.lanUrl && <button onClick={() => { navigator.clipboard?.writeText(pairInfo.lanUrl); setToast("Link copied"); }}>Copy</button>}
+                  </div>
+                </div>
+              </div>
+              <div className="pair-step">
+                <span className="pair-step-n">2</span>
+                <div>
+                  <b>Enter the pairing code</b>
+                  {pairInfo?.protected ? (
+                    <>
+                      <span>Type this code when your phone asks:</span>
+                      <div className="pair-code">{(pairInfo?.code ?? "••••••").split("").map((c, i) => <b key={i}>{c}</b>)}</div>
+                      {!pairInfo?.code && <span className="pair-hint">Open this panel on the host machine to reveal the code.</span>}
+                    </>
+                  ) : (
+                    <span className="pair-hint">No code required on your network. To require one, set <code>HYZR_CHAT_ACCESS_TOKEN</code> and restart.</span>
+                  )}
+                </div>
+              </div>
+              <div className="pair-step">
+                <span className="pair-step-n">3</span>
+                <div>
+                  <b>Start building</b>
+                  <span>Your phone drives the same projects — every task runs and saves in its isolated workspace here.</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="pair-env">
+              <div className="pair-env-row"><img src="/hyzr-chat-mark.svg" alt="" onError={(e) => (e.currentTarget.style.display = "none")} /><b>This machine</b><em>host · paired</em><span className="pair-ok"><IconCheck size={12} /></span></div>
+              <div className="pair-env-row"><IconTerminal size={16} /><b>Local environment</b><em>projects &amp; CLIs</em><span className="pair-ok"><IconCheck size={12} /></span></div>
+              <div className="pair-env-row"><IconGithub size={16} /><b>GitHub</b><em>a repo per project</em><span className="pair-ok"><IconCheck size={12} /></span></div>
+            </div>
+
+            <div className="pair-foot">
+              <span>Prefer a desktop app?</span>
+              <a href="https://github.com/hyzr1/chat" target="_blank" rel="noopener">Get Hyzr for Windows <IconExternal size={12} /></a>
+            </div>
           </div>
         </div>
       )}
