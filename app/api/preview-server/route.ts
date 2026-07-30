@@ -128,12 +128,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing session id" }, { status: 400 });
     }
     if (isHostedRuntime()) {
-      const result = await callPairedAgent(req, "preview.start", { workspaceId: sessionId }, 40_000) as { port?: number; reused?: boolean };
+      const result = await callPairedAgent(req, "preview.start", { workspaceId: sessionId }, 40_000) as {
+        port?: number;
+        reused?: boolean;
+        localUrl?: string;
+        lanUrl?: string | null;
+        networkHost?: string | null;
+        static?: boolean;
+      };
+      const localUrl = result.localUrl || (result.port ? `http://localhost:${result.port}` : undefined);
       return NextResponse.json({
-        url: `/preview/_dev/${encodeURIComponent(sessionId)}/`,
+        url: localUrl,
+        localUrl,
+        lanUrl: result.lanUrl,
+        networkHost: result.networkHost,
         localPort: result.port,
-        proxied: true,
+        proxied: false,
         reused: result.reused,
+        static: result.static,
+        upgradeRequiredForWifi: !result.localUrl,
       });
     }
     const workspace = workspaceFor(sessionId);

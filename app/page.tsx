@@ -32,6 +32,7 @@ import {
   IconArrowUp,
   IconChevron,
   IconSparkles,
+  IconChat,
   IconCpu,
   IconImage,
   IconCode,
@@ -646,6 +647,7 @@ export default function Home() {
   const prefsLoadedRef = useRef(false);
   const queueDispatchRef = useRef(false);
   const previewDismissedRef = useRef<Set<string>>(new Set());
+  const previewUrlRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -943,6 +945,9 @@ export default function Home() {
   useEffect(() => {
     document.documentElement.dataset.workmode = workMode;
   }, [workMode]);
+  useEffect(() => {
+    previewUrlRef.current = previewUrl;
+  }, [previewUrl]);
 
   useEffect(() => { if (!showPair) stopPairPoll(); return () => stopPairPoll(); }, [showPair]);
 
@@ -973,6 +978,26 @@ export default function Home() {
         setHosted(true);
         setAgentPaired(Boolean(info.agentConnected));
         setAgentInfo(info.agent || null);
+        if (!info.agentConnected) {
+          setMessages((current) => {
+            const last = current[current.length - 1];
+            if (!last?.streaming || last.content || !/Analyzing your request/i.test(last.status || "")) return current;
+            return [
+              ...current.slice(0, -1),
+              {
+                ...last,
+                content: info.agent
+                  ? "Hyzr is offline. Reopen **hyzr.cmd** on your computer and try again."
+                  : "Connect your computer before sending Agent work.",
+                streaming: false,
+                status: undefined,
+                completedAt: Date.now(),
+              },
+            ];
+          });
+          setBusy(false);
+          busyRef.current = false;
+        }
         if (showPair) setPairInfo(info);
       })
       .catch(() => {});
@@ -1405,10 +1430,46 @@ export default function Home() {
 
     const ac = new AbortController();
     abortRef.current = ac;
+    const fetchWithin = async (url: string, init: RequestInit, milliseconds: number) => {
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      const timer = window.setTimeout(abort, milliseconds);
+      ac.signal.addEventListener("abort", abort, { once: true });
+      try {
+        return await fetch(url, { ...init, signal: controller.signal });
+      } finally {
+        window.clearTimeout(timer);
+        ac.signal.removeEventListener("abort", abort);
+      }
+    };
+
+    // Never choose the hosted/API execution path from a stale initial render.
+    // The production page can be interactive before its first presence request
+    // completes, so resolve the launcher state before dispatching Agent work.
+    let hostedRun = hosted;
+    let pairedNow = agentPaired;
+    let agentNow = agentInfo;
+    if (workMode === "code") {
+      hostedRun ||= window.location.hostname.endsWith(".vercel.app") || window.location.hostname === "chat.hyzr.ai";
+      try {
+        const setupResponse = await fetchWithin("/api/setup", { cache: "no-store" }, 6_000);
+        if (setupResponse.ok) {
+          const setup = await setupResponse.json();
+          hostedRun = Boolean(setup.hosted);
+          setHosted(hostedRun);
+          if (hostedRun) {
+            pairedNow = Boolean(setup.agentConnected);
+            agentNow = setup.agent || null;
+            setAgentPaired(pairedNow);
+            setAgentInfo(agentNow);
+          }
+        }
+      } catch {}
+    }
 
     // Hosted Agent runs on the user's paired machine, not this server. Route
     // the task through the relay and stream the agent's output back.
-    if (hosted && workMode === "code") {
+    if (hostedRun && workMode === "code") {
       const applyRelay = (content: string, streaming: boolean) => setMessages((prev) => {
         const copy = [...prev];
         for (let i = copy.length - 1; i >= 0; i--) {
@@ -1419,15 +1480,15 @@ export default function Home() {
         }
         return copy;
       });
-      if (!agentPaired) {
-        applyRelay(agentInfo
+      if (!pairedNow) {
+        applyRelay(agentNow
           ? "Hyzr is offline. Reopen **hyzr.cmd** on your computer and leave the terminal open."
           : "Connect your computer first — download the tiny Hyzr terminal launcher and enter the code it asks for.", false);
         setBusy(false); busyRef.current = false; openPair();
         return;
       }
       try {
-        const enq = await fetch("/api/agent/enqueue", {
+        const enq = await fetchWithin("/api/agent/enqueue", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1445,8 +1506,7 @@ export default function Home() {
               plan: planOn,
             },
           }),
-          signal: ac.signal,
-        });
+        }, 10_000);
         const enqJson = await enq.json().catch(() => ({}));
         if (!enq.ok) {
           applyRelay(enqJson.error || "Could not reach your paired agent.", false);
@@ -1460,8 +1520,11 @@ export default function Home() {
         let cursor = 0;
         let ans = "";
         const started = Date.now();
+        let lastPresenceCheck = started;
         while (!ac.signal.aborted) {
-          const ev = await fetch(`/api/agent/events?job=${activeRunId}&cursor=${cursor}`, { cache: "no-store", signal: ac.signal }).then((r) => r.json()).catch(() => null);
+          const ev = await fetchWithin(`/api/agent/events?job=${activeRunId}&cursor=${cursor}`, { cache: "no-store" }, 8_000)
+            .then(async (response) => response.ok ? response.json() : null)
+            .catch(() => null);
           if (ev) {
             cursor = ev.cursor ?? cursor;
             let done = false;
@@ -1472,12 +1535,26 @@ export default function Home() {
             }
             if (done) break;
           }
+          if (Date.now() - lastPresenceCheck > 20_000) {
+            lastPresenceCheck = Date.now();
+            const presence = await fetchWithin("/api/setup", { cache: "no-store" }, 6_000)
+              .then(async (response) => response.ok ? response.json() : null)
+              .catch(() => null);
+            if (presence?.hosted && !presence.agentConnected) {
+              ans += `${ans ? "\n\n" : ""}Hyzr went offline. Reopen **hyzr.cmd** and try again.`;
+              setAgentPaired(false);
+              break;
+            }
+          }
           if (Date.now() - started > 10 * 60 * 1000) { ans += "\n\n_(Timed out waiting for the agent.)_"; break; }
           await new Promise((r) => setTimeout(r, 35));
         }
         applyRelay(ans || "The agent returned no output.", false);
       } catch (e: any) {
-        if (e?.name !== "AbortError") applyRelay("Lost connection to your paired agent.", false);
+        if (!(e?.name === "AbortError" && ac.signal.aborted)) {
+          applyRelay("Could not reach your paired computer in time. Reopen **hyzr.cmd** and try again.", false);
+          setAgentPaired(false);
+        }
       } finally {
         setBusy(false); busyRef.current = false;
       }
@@ -1867,27 +1944,34 @@ export default function Home() {
       if (w.entry || hasProjectServer) {
         let liveUrl: string | null = null;
         let serverError = "";
-        if (hasProjectServer) {
-          try {
-            const serverResponse = await fetch("/api/preview-server", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ sessionId }),
-            });
-            const server = await serverResponse.json();
-            if (serverResponse.ok && server.url) {
-              liveUrl = server.url;
-              setPreviewUrl(server.url);
-            } else {
-              serverError = server.error || "The project dev server could not start";
+        try {
+          const serverResponse = await fetch("/api/preview-server", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId }),
+          });
+          const server = await serverResponse.json();
+          if (serverResponse.ok) {
+            liveUrl = isMobileViewport()
+              ? (server.lanUrl || null)
+              : (server.localUrl || server.url || null);
+            if (!liveUrl && isMobileViewport()) {
+              serverError = server.upgradeRequiredForWifi
+                ? "Download the latest Hyzr launcher on your computer to enable Wi-Fi previews."
+                : "This computer does not have a reachable Wi-Fi address. Connect both devices to the same network and try again.";
+            } else if (liveUrl) {
+              previewUrlRef.current = liveUrl;
+              setPreviewUrl(liveUrl);
             }
-          } catch (error: any) {
-            serverError = error?.message || "The project dev server could not start";
+          } else {
+            serverError = server.error || "The local project server could not start";
           }
-        } else {
-          setPreviewUrl(null);
+        } catch (error: any) {
+          serverError = error?.message || "The local project server could not start";
         }
-        if (!w.entry && !liveUrl) {
+        if (!liveUrl) {
+          previewUrlRef.current = null;
+          setPreviewUrl(null);
           if (reportFailure) setToast(serverError || "This project does not have a previewable page yet");
           return false;
         }
@@ -1911,9 +1995,21 @@ export default function Home() {
       return;
     }
     previewDismissedRef.current.delete(currentId);
+    const directWindow = window.location.protocol === "https:"
+      ? window.open("", "hyzr-local-preview")
+      : null;
+    if (directWindow) {
+      directWindow.document.title = "Starting local preview";
+      directWindow.document.body.innerHTML = "<p style=\"font:14px system-ui;padding:24px\">Starting the project on your computer…</p>";
+    }
     setPreviewStarting(true);
     const found = await checkPreview(currentId, 0, false, true);
     setPreviewStarting(false);
+    if (found && directWindow && previewUrlRef.current) {
+      directWindow.location.replace(previewUrlRef.current);
+    } else if (directWindow) {
+      directWindow.close();
+    }
     if (!found) setToast((current) => current || "No previewable app has been created in this project yet");
   }
   function regenerate() {
@@ -2140,7 +2236,6 @@ export default function Home() {
   const hiddenMessageCount = Math.max(0, messages.length - visibleMessageCount);
   const visibleMessages = hiddenMessageCount ? messages.slice(hiddenMessageCount) : messages;
   const activeTaskRuns = taskRuns.filter((run) => run.status === "running");
-  const attentionTaskRuns = taskRuns.filter((run) => run.status === "needs_attention");
   const showBackgroundRun = activeTaskRuns.length > 0 && view !== "tasks";
 
   return (
@@ -2170,26 +2265,7 @@ export default function Home() {
             className={`nav-btn ${view === "chat" ? "active" : ""}`}
             onClick={() => openView("chat")}
           >
-            <IconSparkles size={16} /> Chat
-          </button>
-          <button
-            className={`nav-btn ${view === "tasks" ? "active" : ""}`}
-            onClick={() => openView("tasks")}
-          >
-            <IconGauge size={16} /> Tasks
-            {(activeTaskRuns.length > 0 || attentionTaskRuns.length > 0) && <span className={`nav-count ${attentionTaskRuns.length ? "attention" : ""}`}>{activeTaskRuns.length || attentionTaskRuns.length}</span>}
-          </button>
-          <button
-            className={`nav-btn ${view === "proof" ? "active" : ""}`}
-            onClick={() => openView("proof")}
-          >
-            <IconShield size={16} /> Proof
-          </button>
-          <button
-            className={`nav-btn ${view === "spaces" ? "active" : ""}`}
-            onClick={() => openView("spaces")}
-          >
-            <IconLayers size={16} /> Projects
+            <IconChat size={16} /> Chat
           </button>
           <button
             className={`nav-btn ${view === "github" ? "active" : ""}`}
@@ -2829,10 +2905,19 @@ function PreviewPane({
   const [dragging, setDragging] = useState(false);
   const [files, setFiles] = useState<{ name: string; path: string; type: "file" | "dir"; size?: number }[]>([]);
   const [showFiles, setShowFiles] = useState(false);
-  const [filesMinimized, setFilesMinimized] = useState(false);
-  const [filesMaximized, setFilesMaximized] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  const [securePage, setSecurePage] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set());
   const [openFile, setOpenFile] = useState<{ path: string; content?: string; error?: string } | null>(null);
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 760px)");
+    const sync = () => setMobile(query.matches);
+    sync();
+    setSecurePage(window.location.protocol === "https:");
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -2920,26 +3005,18 @@ function PreviewPane({
       </div>
       <div className="preview-body">
         {showFiles && (
-          <aside className={`file-browser floating ${filesMinimized ? "minimized" : ""} ${filesMaximized ? "maximized" : ""}`}>
+          <aside className="file-browser">
             <div className="file-browser-head">
               <div className="file-browser-title">
-                <span className="file-browser-icon"><IconFolder size={14} /></span>
-                <span><strong>Project files</strong><small>{files.filter((file) => file.type === "file").length} files</small></span>
+                <IconFolder size={14} />
+                <span><strong>Files</strong><small>{files.filter((file) => file.type === "file").length}</small></span>
               </div>
               <div className="file-window-actions">
-                <button onClick={() => setFilesMinimized((v) => !v)} title={filesMinimized ? "Restore" : "Minimize"}>−</button>
-                <button onClick={() => { setFilesMaximized((v) => !v); setFilesMinimized(false); }} title={filesMaximized ? "Restore size" : "Maximize"}>□</button>
                 <button onClick={() => setShowFiles(false)} title="Close"><IconX size={13} /></button>
               </div>
             </div>
-            {!filesMinimized && <>
-              <div className="file-browser-tools">
-                {openFile ? <button onClick={() => setOpenFile(null)}><IconChevron size={11} /> Back to files</button> : <>
-                  <button onClick={() => setCollapsedFolders(new Set())}>Expand all</button>
-                  <button onClick={() => setCollapsedFolders(new Set(files.filter((file) => file.type === "dir").map((file) => file.path)))}>Collapse all</button>
-                </>}
-              </div>
-              {openFile ? <div className="file-inspector">
+            {openFile ? <div className="file-inspector">
+                <button className="file-browser-back" onClick={() => setOpenFile(null)}><IconChevron size={11} /> Files</button>
                 <div className="file-inspector-path"><IconFile size={13} /><span>{openFile.path}</span></div>
                 {openFile.error ? <div className="file-empty">{openFile.error}</div> : openFile.content === undefined ? <div className="file-empty"><span className="spinner" /> Opening file…</div> : <pre>{openFile.content}</pre>}
               </div> : <div className="file-tree">
@@ -2955,17 +3032,29 @@ function PreviewPane({
                   );
                 }) : <div className="file-empty">Files will appear as models build…</div>}
               </div>}
-            </>}
           </aside>
         )}
-        <iframe
-          key={nonce}
-          src={previewSrc}
-          className="preview-frame"
-          title="preview"
-          style={{ pointerEvents: dragging ? "none" : "auto" }}
-          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
-        />
+        {(mobile || securePage) && serverUrl?.startsWith("http://") ? (
+          <div className="preview-direct">
+            <span><IconGlobe size={20} /></span>
+            <strong>{mobile ? "Preview on this Wi-Fi network" : "Local preview ready"}</strong>
+            <p>The project is running directly on your computer, not on Hyzr or Vercel.</p>
+            <code>{serverUrl}</code>
+            <a href={previewSrc} target="_blank" rel="noreferrer">{mobile ? "Open Wi-Fi preview" : "Open localhost preview"} <IconExternal size={14} /></a>
+            <small>{mobile
+              ? "Keep the Hyzr terminal open and connect this phone to the same Wi-Fi as your computer."
+              : "Your browser keeps HTTP localhost outside the HTTPS Hyzr frame, so the real dev server opens in its own tab."}</small>
+          </div>
+        ) : (
+          <iframe
+            key={nonce}
+            src={previewSrc}
+            className="preview-frame"
+            title="preview"
+            style={{ pointerEvents: dragging ? "none" : "auto" }}
+            sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
+          />
+        )}
       </div>
     </div>
   );
@@ -3260,9 +3349,7 @@ function MessageView({
   return (
     <div className="msg assistant">
       <div className="who">
-        <span className="who-ic">
-          <HyzrMark size={14} />
-        </span>
+        <HyzrMark size={22} />
         Hyzr Chat
       </div>
 

@@ -46,10 +46,10 @@ test("mobile primary navigation remains usable without horizontal overflow", asy
   await page.waitForLoadState("networkidle");
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("tab", { name: "Agent" }).click();
-  for (const destination of ["Tasks", "Proof", "Projects", "Work intake", "Library"]) {
+  await expect(page.locator(".primary-nav").getByRole("button", { name: /^(Tasks|Proof|Projects)$/ })).toHaveCount(0);
+  for (const destination of ["Work intake", "Library"]) {
     await page.getByRole("button", { name: "Open navigation" }).click();
-    const accessibleName = destination === "Tasks" ? /^Tasks(?: \d+)?$/ : new RegExp(`^${destination}$`);
-    await page.getByRole("button", { name: accessibleName }).click();
+    await page.getByRole("button", { name: new RegExp(`^${destination}$`) }).click();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, `${destination} should not overflow horizontally`).toBeLessThanOrEqual(1);
     const durableUrl = page.url();
@@ -177,7 +177,7 @@ test("Preview starts a project dev server even before an HTML build exists", asy
   const agent = {
     host: "Preview PC",
     platform: "win32",
-    version: "1.1.1",
+    version: "1.1.2",
     node: "v24",
     claude: true,
     codex: true,
@@ -214,13 +214,118 @@ test("Preview starts a project dev server even before an HTML build exists", asy
   await page.route("**/api/preview-server", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify({ url: "/preview/_dev/preview-project/", localPort: 5173, proxied: true }),
+    body: JSON.stringify({
+      url: "http://localhost:5173",
+      localUrl: "http://localhost:5173",
+      lanUrl: "http://192.168.1.44:5173",
+      localPort: 5173,
+      proxied: false,
+    }),
+  }));
+  await page.route("http://localhost:5173/**", (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html",
+    body: "<!doctype html><h1>Local preview</h1>",
   }));
   await page.goto("/");
   await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
   await page.locator("textarea").fill("Create a Next.js portfolio");
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.locator("iframe.preview-frame")).toHaveAttribute("src", /\/preview\/_dev\/preview-project\/\?n=/);
+  await expect(page.locator("iframe.preview-frame")).toHaveAttribute("src", /^http:\/\/localhost:5173\/?\?n=/);
+  await page.getByRole("button", { name: "Toggle project files" }).click();
+  await expect(page.locator(".file-browser")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Expand all" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Collapse all" })).toHaveCount(0);
+  await page.locator(".file-window-actions").getByRole("button", { name: "Close" }).click();
+  await page.locator(".preview-actions").getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.locator(".preview-path")).toHaveText("http://localhost:5173");
+});
+
+test("Agent send waits for presence and never leaves an offline request analyzing", async ({ page }) => {
+  await createTestAccount(page);
+  await page.route("**/api/setup", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        hosted: true,
+        agentConnected: false,
+        ready: false,
+        agent: {
+          host: "My PC",
+          platform: "win32",
+          version: "1.1.2",
+          node: "v24",
+          claude: true,
+          codex: true,
+          git: true,
+          gh: true,
+          engine: "claude+codex",
+        },
+      }),
+    });
+  });
+  await page.goto("/");
+  await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
+  await page.locator("textarea").fill("Improve the page");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(/Hyzr is offline\. Reopen/i)).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText(/Analyzing your request/i)).toHaveCount(0);
+});
+
+test("mobile preview opens the computer's Wi-Fi dev server directly", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createTestAccount(page);
+  const agent = {
+    host: "Preview PC",
+    platform: "win32",
+    version: "1.1.2",
+    node: "v24",
+    claude: true,
+    codex: true,
+    git: true,
+    gh: true,
+    engine: "claude+codex",
+  };
+  await page.route("**/api/setup", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ hosted: true, agentConnected: true, ready: true, agent }),
+  }));
+  await page.route("**/api/agent/enqueue", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ ok: true, jobId: "mobile-preview" }),
+  }));
+  await page.route("**/api/agent/events**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ events: [{ type: "done" }], cursor: 1 }),
+  }));
+  await page.route("**/api/workspace**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ files: [{ name: "index.html", path: "index.html", type: "file", size: 100 }], entry: "index.html", count: 1 }),
+  }));
+  await page.route("**/api/preview-server", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      url: "http://localhost:43120",
+      localUrl: "http://localhost:43120",
+      lanUrl: "http://192.168.1.44:43120",
+      localPort: 43120,
+      proxied: false,
+    }),
+  }));
+  await page.goto("/");
+  await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
+  await page.locator("textarea").fill("Create a static portfolio");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Preview on this Wi-Fi network")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open Wi-Fi preview/ })).toHaveAttribute("href", /^http:\/\/192\.168\.1\.44:43120\/?\?n=/);
 });
 
 test("evaluation lab runs free audits and gates paid comparisons", async ({ page }) => {

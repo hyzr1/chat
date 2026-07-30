@@ -1,6 +1,7 @@
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
@@ -8,7 +9,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 2;
-const VERSION = "1.1.1";
+const VERSION = "1.1.2";
 const IS_WIN = process.platform === "win32";
 const DEFAULT_ROOT = path.join(os.homedir(), "Hyzr");
 const STATE_ROOT = path.join(os.homedir(), ".hyzr", "agent");
@@ -23,7 +24,31 @@ const log = (...values) => console.log("[hyzr]", ...values);
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const cleanId = (value) => String(value || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
 
+function previewListenerPidsFromNetstat(output, port) {
+  const suffix = `:${Number(port)}`;
+  return String(output || "").split(/\r?\n/).flatMap((line) => {
+      const columns = line.trim().split(/\s+/);
+      if (columns[0]?.toUpperCase() !== "TCP" || !columns[1]?.endsWith(suffix) || columns[3]?.toUpperCase() !== "LISTENING") return [];
+      const pid = Number(columns[4]);
+      return Number.isInteger(pid) && pid > 0 ? [pid] : [];
+  });
+}
+
+function windowsPreviewListenerPids(port) {
+  if (!IS_WIN || !Number.isInteger(Number(port))) return [];
+  try {
+    const result = spawnSync("netstat.exe", ["-ano", "-p", "tcp"], { windowsHide: true, encoding: "utf8" });
+    return previewListenerPidsFromNetstat(result.stdout, port);
+  } catch {
+    return [];
+  }
+}
+
 function stopPreviewRecord(id, record) {
+  if (record?.server) {
+    try { record.server.close(); } catch {}
+  }
+  const listenerPids = record?.child && !record.attached ? windowsPreviewListenerPids(record.port) : [];
   if (record?.child && !record.child.killed) {
     try {
       if (IS_WIN && record.child.pid) {
@@ -36,6 +61,10 @@ function stopPreviewRecord(id, record) {
     } catch {
       try { record.child.kill(); } catch {}
     }
+  }
+  for (const pid of listenerPids) {
+    if (pid === record?.child?.pid) continue;
+    try { spawnSync("taskkill.exe", ["/pid", String(pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" }); } catch {}
   }
   previewServers.delete(id);
 }
@@ -393,6 +422,122 @@ async function walkWorkspace(directory, relative = "", depth = 0, output = []) {
   return output;
 }
 
+const STATIC_PREVIEW_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".htm": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".txt": "text/plain; charset=utf-8",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
+
+function privateLanAddress(interfaces = os.networkInterfaces()) {
+  const candidates = Object.entries(interfaces || {}).flatMap(([adapter, addresses]) =>
+    (addresses || []).filter((item) =>
+      item && !item.internal && (item.family === "IPv4" || item.family === 4),
+    ).map((item) => ({ adapter, address: item.address })),
+  ).filter(({ address }) =>
+    /^10\./.test(address)
+    || /^192\.168\./.test(address)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(address),
+  );
+  const physical = candidates.filter(({ adapter }) => !/\b(vethernet|virtual|wsl|docker|vmware|virtualbox|tailscale)\b/i.test(adapter));
+  return (physical.length ? physical : candidates).sort((a, b) => {
+    const score = ({ adapter, address }) =>
+      (/wi-?fi|wireless/i.test(adapter) ? 0 : /ethernet/i.test(adapter) ? 10 : 20)
+      + (/^192\.168\./.test(address) ? 0 : /^10\./.test(address) ? 1 : 2);
+    return score(a) - score(b);
+  })[0]?.address || null;
+}
+
+function previewDetails(port, extra = {}, lanAvailable = true) {
+  const networkHost = privateLanAddress();
+  return {
+    port,
+    localUrl: `http://localhost:${port}`,
+    lanUrl: lanAvailable && networkHost ? `http://${networkHost}:${port}` : null,
+    networkHost: lanAvailable ? networkHost : null,
+    ...extra,
+  };
+}
+
+function previewHostArgs(scriptCommand) {
+  if (/\bnext(?:\.js)?\b/i.test(scriptCommand)) return ["--hostname", "0.0.0.0"];
+  if (/\b(vite|astro|ng\s+serve|vue-cli-service\s+serve)\b/i.test(scriptCommand)) return ["--host", "0.0.0.0"];
+  return [];
+}
+
+function staticPreviewServer(workspace, entry) {
+  const entryFile = safeRelative(workspace, entry);
+  const root = path.dirname(entryFile);
+  const rootPrefix = `${path.resolve(root)}${path.sep}`;
+  return createServer(async (request, response) => {
+    try {
+      const pathname = decodeURIComponent(new URL(request.url || "/", "http://localhost").pathname);
+      const relative = pathname.replace(/^\/+/, "") || path.basename(entryFile);
+      if (relative.split("/").some((part) => part.startsWith(".")) || /^package(?:-lock)?\.json$/i.test(path.basename(relative))) {
+        response.writeHead(404).end("Not found");
+        return;
+      }
+      let file = path.resolve(root, relative);
+      if (file !== path.resolve(root) && !file.startsWith(rootPrefix)) {
+        response.writeHead(400).end("Bad path");
+        return;
+      }
+      try {
+        const metadata = await stat(file);
+        if (metadata.isDirectory()) file = path.join(file, "index.html");
+        else if (!metadata.isFile()) throw new Error("Not a file");
+      } catch {
+        if (path.extname(relative)) {
+          response.writeHead(404).end("Not found");
+          return;
+        }
+        file = entryFile;
+      }
+      const type = STATIC_PREVIEW_TYPES[path.extname(file).toLowerCase()];
+      if (!type) {
+        response.writeHead(404).end("Not found");
+        return;
+      }
+      const body = await readFile(file);
+      response.writeHead(200, {
+        "Content-Type": type,
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      });
+      response.end(body);
+    } catch {
+      response.writeHead(404).end("Not found");
+    }
+  });
+}
+
+async function listenStaticPreview(server) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const port = 43100 + Math.floor(Math.random() * 800);
+    const listening = await new Promise((resolve) => {
+      const onError = () => { server.off("listening", onListening); resolve(false); };
+      const onListening = () => { server.off("error", onError); resolve(true); };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(port, "0.0.0.0");
+    });
+    if (listening) return port;
+  }
+  throw new Error("No local preview port is available.");
+}
+
 async function startPreviewServer(context, workspaceId) {
   const workspace = safeWorkspace(context.workspaceRoot, workspaceId);
   const id = cleanId(workspaceId);
@@ -402,24 +547,47 @@ async function startPreviewServer(context, workspaceId) {
       const response = await fetch(`http://127.0.0.1:${existing.port}/`, { signal: AbortSignal.timeout(1200) });
       if (response.status < 500) {
         existing.lastUsed = Date.now();
-        return { port: existing.port, reused: true, attached: Boolean(existing.attached) };
+        return previewDetails(existing.port, { reused: true, attached: Boolean(existing.attached), static: Boolean(existing.server) }, existing.lanAvailable !== false);
       }
     } catch {}
     stopPreviewRecord(id, existing);
   }
   const packageFile = safeRelative(workspace, "package.json");
-  let manifest;
-  try { manifest = JSON.parse(await readFile(packageFile, "utf8")); } catch { throw new Error("This project has no package.json dev server."); }
+  let manifest = null;
+  try { manifest = JSON.parse(await readFile(packageFile, "utf8")); } catch {}
   const script = manifest?.scripts?.dev ? "dev" : manifest?.scripts?.start ? "start" : "";
-  if (!script) throw new Error("Add a dev or start script to package.json before opening a live preview.");
+  if (!script) {
+    const files = await walkWorkspace(workspace);
+    const entry = previewEntry(files);
+    if (!entry) throw new Error("Add an index.html or a package.json dev script before opening a preview.");
+    if (previewServers.size >= PREVIEW_SERVER_LIMIT) {
+      const oldest = [...previewServers.entries()].sort((a, b) =>
+        Number(a[1].lastUsed || a[1].startedAt || 0) - Number(b[1].lastUsed || b[1].startedAt || 0),
+      )[0];
+      if (oldest) stopPreviewRecord(oldest[0], oldest[1]);
+    }
+    const server = staticPreviewServer(workspace, entry);
+    const port = await listenStaticPreview(server);
+    server.unref();
+    previewServers.set(id, { child: null, server, port, workspace, startedAt: Date.now(), lastUsed: Date.now(), attached: false, lanAvailable: true });
+    return previewDetails(port, { reused: false, attached: false, static: true });
+  }
   const scriptCommand = String(manifest.scripts[script] || "");
   const declaredPort = previewPortFor(manifest, scriptCommand);
   if (declaredPort) {
     try {
       const response = await fetch(`http://127.0.0.1:${declaredPort}/`, { signal: AbortSignal.timeout(1500) });
       if (response.status < 500) {
-        previewServers.set(id, { child: null, port: declaredPort, workspace, startedAt: Date.now(), lastUsed: Date.now(), attached: true });
-        return { port: declaredPort, reused: true, attached: true };
+        const networkHost = privateLanAddress();
+        let lanAvailable = false;
+        if (networkHost) {
+          try {
+            const lanResponse = await fetch(`http://${networkHost}:${declaredPort}/`, { signal: AbortSignal.timeout(1500) });
+            lanAvailable = lanResponse.status < 500;
+          } catch {}
+        }
+        previewServers.set(id, { child: null, server: null, port: declaredPort, workspace, startedAt: Date.now(), lastUsed: Date.now(), attached: true, lanAvailable });
+        return previewDetails(declaredPort, { reused: true, attached: true, static: false }, lanAvailable);
       }
     } catch {}
   }
@@ -431,8 +599,8 @@ async function startPreviewServer(context, workspaceId) {
     )[0];
     if (oldest) stopPreviewRecord(oldest[0], oldest[1]);
   }
-  const port = 43100 + Math.floor(Math.random() * 90);
-  const launch = commandLaunch(npm, ["run", script, "--", "--port", String(port)]);
+  const port = 43100 + Math.floor(Math.random() * 800);
+  const launch = commandLaunch(npm, ["run", script, "--", "--port", String(port), ...previewHostArgs(scriptCommand)]);
   const child = spawn(launch.command, launch.args, {
     cwd: workspace,
     windowsHide: true,
@@ -442,7 +610,7 @@ async function startPreviewServer(context, workspaceId) {
       ...process.env,
       BROWSER: "none",
       PORT: String(port),
-      HOST: "127.0.0.1",
+      HOST: "0.0.0.0",
       NO_COLOR: "1",
       NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --max-old-space-size=768`.trim(),
     },
@@ -451,14 +619,17 @@ async function startPreviewServer(context, workspaceId) {
   let output = "";
   child.stdout?.on("data", (chunk) => { output = `${output}${chunk}`.slice(-12_000); });
   child.stderr?.on("data", (chunk) => { output = `${output}${chunk}`.slice(-12_000); });
-  child.once("close", () => previewServers.delete(id));
-  previewServers.set(id, { child, port, workspace, startedAt: Date.now(), lastUsed: Date.now(), attached: false });
+  const record = { child, server: null, port, workspace, startedAt: Date.now(), lastUsed: Date.now(), attached: false, lanAvailable: true };
+  child.once("close", () => {
+    if (previewServers.get(id) === record) stopPreviewRecord(id, record);
+  });
+  previewServers.set(id, record);
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode != null) throw new Error(output.trim() || `The ${script} script exited with code ${child.exitCode}.`);
     try {
       const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1200) });
-      if (response.status < 500) return { port, reused: false, attached: false };
+      if (response.status < 500) return previewDetails(port, { reused: false, attached: false, static: false });
     } catch {}
     await sleep(350);
   }
@@ -900,4 +1071,4 @@ export async function loadAgentConfig() {
   return readJson(CONFIG_FILE, {});
 }
 
-export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, previewEntry, previewPortFor, streamSeparator, specialistPlan };
+export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, previewEntry, previewPortFor, previewHostArgs, previewListenerPidsFromNetstat, privateLanAddress, startPreviewServer, sweepPreviewServers, streamSeparator, specialistPlan };

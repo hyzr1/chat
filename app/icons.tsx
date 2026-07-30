@@ -99,6 +99,12 @@ export const IconSparkles = (p: P) => (
   </Svg>
 );
 
+export const IconChat = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 5.8A2.8 2.8 0 0 1 6.8 3h10.4A2.8 2.8 0 0 1 20 5.8v6.4a2.8 2.8 0 0 1-2.8 2.8H10l-4.8 3.7.9-3.7A2.8 2.8 0 0 1 4 12.2Z" />
+  </Svg>
+);
+
 export const IconCpu = (p: P) => (
   <Svg {...p}>
     <rect x="6" y="6" width="12" height="12" rx="2.5" />

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -42,6 +43,80 @@ test("preview discovery recognizes declared and framework dev ports", () => {
   assert.equal(__test.previewPortFor({}, "next dev"), 3000);
   assert.equal(__test.previewPortFor({}, "vite"), 5173);
   assert.equal(__test.previewPortFor({}, "node server.js"), null);
+});
+
+test("preview servers bind framework-specific hosts for Wi-Fi access", () => {
+  assert.deepEqual(__test.previewHostArgs("next dev"), ["--hostname", "0.0.0.0"]);
+  assert.deepEqual(__test.previewHostArgs("vite"), ["--host", "0.0.0.0"]);
+  assert.deepEqual(__test.previewHostArgs("node server.js"), []);
+});
+
+test("Windows preview cleanup resolves the process listening on its assigned port", () => {
+  const output = [
+    "  TCP    0.0.0.0:43126        0.0.0.0:0              LISTENING       13028",
+    "  TCP    127.0.0.1:3000       0.0.0.0:0              LISTENING       11740",
+  ].join("\r\n");
+  assert.deepEqual(__test.previewListenerPidsFromNetstat(output, 43126), [13028]);
+});
+
+test("preview discovery selects a private LAN address only", () => {
+  assert.equal(__test.privateLanAddress({
+    Loopback: [{ address: "127.0.0.1", family: "IPv4", internal: true }],
+    "vEthernet (WSL)": [{ address: "172.22.16.1", family: "IPv4", internal: false }],
+    Ethernet: [{ address: "192.168.1.44", family: "IPv4", internal: false }],
+  }), "192.168.1.44");
+  assert.equal(__test.privateLanAddress({
+    Public: [{ address: "203.0.113.10", family: "IPv4", internal: false }],
+  }), null);
+});
+
+test("static projects run on a direct local preview server", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hyzr-static-preview-"));
+  const workspace = path.join(root, "static-chat");
+  await mkdir(workspace);
+  await writeFile(path.join(workspace, "index.html"), "<!doctype html><h1>Direct local preview</h1>");
+  try {
+    const result = await __test.startPreviewServer({ workspaceRoot: root, tools: {} }, "static-chat");
+    assert.match(result.localUrl, /^http:\/\/localhost:\d+$/);
+    const response = await fetch(result.localUrl);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /Direct local preview/);
+  } finally {
+    __test.sweepPreviewServers(true);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("launched framework preview servers are stopped with their listener process", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hyzr-framework-preview-"));
+  const workspace = path.join(root, "framework-chat");
+  await mkdir(workspace);
+  await writeFile(path.join(workspace, "package.json"), JSON.stringify({
+    private: true,
+    scripts: { dev: "node server.js" },
+  }));
+  await writeFile(path.join(workspace, "server.js"), [
+    "const http = require('node:http');",
+    "const index = process.argv.indexOf('--port');",
+    "const port = Number(index >= 0 ? process.argv[index + 1] : process.env.PORT);",
+    "http.createServer((_request, response) => response.end('framework preview')).listen(port, '0.0.0.0');",
+  ].join("\n"));
+  const npm = process.platform === "win32" ? path.join(path.dirname(process.execPath), "npm.cmd") : "npm";
+  let result;
+  try {
+    result = await __test.startPreviewServer({ workspaceRoot: root, tools: { npm } }, "framework-chat");
+    assert.equal(await (await fetch(result.localUrl)).text(), "framework preview");
+  } finally {
+    __test.sweepPreviewServers(true);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    if (result) {
+      await assert.rejects(
+        fetch(result.localUrl, { signal: AbortSignal.timeout(750) }),
+        /fetch failed|aborted|timeout/i,
+      );
+    }
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Claude text after tool work starts a readable paragraph", () => {
