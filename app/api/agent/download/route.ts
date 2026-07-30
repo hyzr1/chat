@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 const RELEASES = "https://github.com/hyzr1/chat/releases/latest";
-const WINDOWS_INSTALLER = `${RELEASES}/download/Hyzr-Agent-1.0.0-win-x64.exe`;
+const WINDOWS_INSTALLER = `${RELEASES}/download/Hyzr-Agent-1.0.1-win-x64.exe`;
 
 export function GET(request: NextRequest) {
   const platform = request.nextUrl.searchParams.get("platform");

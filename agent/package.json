@@ -1,7 +1,8 @@
 {
   "name": "@hyzr/agent",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Hyzr",
+  "desktopName": "hyzr-agent",
   "description": "Hyzr local agent — runs Agent tasks on your own machine's Claude and Codex.",
   "type": "module",
   "main": "desktop/main.mjs",
@@ -27,6 +28,7 @@
   "build": {
     "appId": "ai.hyzr.agent",
     "productName": "Hyzr Agent",
+    "executableName": "hyzr-agent",
     "protocols": [{ "name": "Hyzr Pairing", "schemes": ["hyzr"] }],
     "artifactName": "Hyzr-Agent-${version}-${os}-${arch}.${ext}",
     "files": ["desktop/**/*", "src/**/*", "package.json"],
@@ -41,7 +43,11 @@
       "deleteAppDataOnUninstall": false
     },
     "mac": { "target": ["dmg"], "category": "public.app-category.developer-tools" },
-    "linux": { "target": ["AppImage", "deb"], "category": "Development" }
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Development",
+      "syncDesktopName": true
+    }
   },
   "license": "MIT"
 }
