@@ -46,10 +46,17 @@ runs each task the site sends on the best-fit CLI in an isolated per-task
 workspace, streaming output back. No separate app, no other install — identical
 on every machine.
 
-> Routing note: the agent routes each task to Claude or Codex (using both across
-> the workload). Full intra-task multi-model planning (the app's planner
-> splitting one task across models at once) is a future upgrade that bundles the
-> execution engine into the agent.
+> Two levels of routing exist:
+>
+> - **Self-contained agent** (`hyzr-agent.mjs`, one file, Node only): routes each
+>   task to Claude or Codex, using both across the workload. Simplest to run.
+> - **Full-engine pairing** (run the Hyzr app locally, `POST /api/agent/connect`
+>   with `{url, code}`): every hosted Agent task runs through this machine's real
+>   planner + capability routing across *all* models (Fable 5 for design, Opus for
+>   APIs, Sonnet for math, a small GPT for image-gen, …), with each subtask's
+>   routing decision streamed back to the hosted UI. Each task lands in its own
+>   isolated workspace folder on disk. This is the same pipeline the app runs
+>   locally — no special-casing any machine.
 
 ## 3. What still uses which path
 
