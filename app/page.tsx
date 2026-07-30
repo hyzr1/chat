@@ -69,12 +69,16 @@ import {
 
 type Role = "user" | "assistant";
 type Mode = "local" | "byok";
+type WorkMode = "chat" | "code";
 type Effort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 type Theme = "dark" | "light" | "system";
 interface ProductPrefs { autoPreview: boolean; autoReview: boolean; adaptiveRouting: boolean; voiceInput: boolean; language: string; reducedMotion: boolean; compactChat: boolean; showUsage: boolean; sendWithEnter: boolean; newChatKey: "k" | "n"; saveHistory: boolean; }
 const DEFAULT_PRODUCT_PREFS: ProductPrefs = { autoPreview: true, autoReview: true, adaptiveRouting: true, voiceInput: true, language: "Auto detect", reducedMotion: false, compactChat: false, showUsage: true, sendWithEnter: true, newChatKey: "k", saveHistory: true };
 const isMobileViewport = () => typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches;
 const LIBRARY_VIEWS: View[] = ["connectors", "skills", "workflows"];
+// Views reachable while in Chat mode. Everything else (tasks, proof, projects,
+// work intake, library, artifacts) belongs to Code/Pair mode.
+const CHAT_MODE_VIEWS = new Set<View>(["chat", "customize", "memory"]);
 const URL_VIEWS = new Set<View>(["tasks", "proof", "spaces", "artifacts", "connectors", "skills", "workflows", "memory", "customize", "github"]);
 const VIEW_TITLES: Record<View, string> = {
   chat: "New project",
@@ -578,6 +582,7 @@ export default function Home() {
   const [theme, setTheme] = useState<Theme>("system");
   const [productPrefs, setProductPrefs] = useState<ProductPrefs>(DEFAULT_PRODUCT_PREFS);
   const [view, setView] = useState<View>("chat");
+  const [workMode, setWorkMode] = useState<WorkMode>("chat");
   const [toast, setToast] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [histQuery, setHistQuery] = useState("");
@@ -768,6 +773,7 @@ export default function Home() {
         if (p) {
           const prefs = JSON.parse(p);
           if (prefs.mode) setMode(prefs.mode);
+          if (prefs.workMode === "chat" || prefs.workMode === "code") setWorkMode(prefs.workMode);
           if (["dark", "light", "system"].includes(prefs.theme)) setTheme(prefs.theme);
           if (prefs.productPrefs) setProductPrefs({ ...DEFAULT_PRODUCT_PREFS, ...prefs.productPrefs });
           if (prefs.routingRules && prefs.routingPolicyVersion === 3) setRoutingRules({ ...DEFAULT_ROUTING_RULES, ...prefs.routingRules });
@@ -881,9 +887,9 @@ export default function Home() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ mode, planOn, effort, theme, productPrefs, routingRules, collapsed, modelPool, modelCatalogVersion: 2, routingPolicyVersion: 3 }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ mode, workMode, planOn, effort, theme, productPrefs, routingRules, collapsed, modelPool, modelCatalogVersion: 2, routingPolicyVersion: 3 }));
     } catch {}
-  }, [mode, planOn, effort, theme, productPrefs, routingRules, collapsed, modelPool]);
+  }, [mode, workMode, planOn, effort, theme, productPrefs, routingRules, collapsed, modelPool]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: light)");
@@ -1013,6 +1019,19 @@ export default function Home() {
     setMode(m);
     setOverride("auto");
     setShowModels(false);
+  }
+  // Chat = fast conversation/search (routing only, no workspace). Code = the
+  // full building surface: projects, tasks, proof, work intake, the pairer.
+  function switchWorkMode(next: WorkMode) {
+    setWorkMode(next);
+    if (next === "chat") {
+      // Chat mode has no workspace views; always land on the conversation.
+      if (!CHAT_MODE_VIEWS.has(view)) openView("chat");
+      setPlanOn(false);
+    } else {
+      setPlanOn(true);
+    }
+    if (isMobileViewport()) setCollapsed(true);
   }
   function newChat() {
     const mobile = isMobileViewport();
@@ -1753,7 +1772,7 @@ export default function Home() {
             </div>
           )}
         </div>
-        {mode === "local" && (
+        {workMode === "code" && mode === "local" && (
           <button
             className={`tool-btn ${planOn ? "active" : ""}`}
             onClick={() => setPlanOn((p) => !p)}
@@ -1857,10 +1876,18 @@ export default function Home() {
             <IconPanelLeft size={17} />
           </button>
         </div>
+        <div className="workmode-toggle" role="tablist" aria-label="Mode">
+          <button role="tab" aria-selected={workMode === "chat"} className={workMode === "chat" ? "on" : ""} onClick={() => switchWorkMode("chat")}>
+            <IconSearch size={15} /> Chat
+          </button>
+          <button role="tab" aria-selected={workMode === "code"} className={workMode === "code" ? "on" : ""} onClick={() => switchWorkMode("code")}>
+            <IconCode size={15} /> Code
+          </button>
+        </div>
         <button className="new-btn" onClick={newChat}>
-          <span className="new-plus"><IconPlus size={16} /></span><span>New</span>
+          <span className="new-plus"><IconPlus size={16} /></span><span>{workMode === "chat" ? "New chat" : "New"}</span>
         </button>
-        <div className="nav primary-nav">
+        {workMode === "code" && <div className="nav primary-nav">
           <button
             className={`nav-btn ${view === "chat" ? "active" : ""}`}
             onClick={() => openView("chat")}
@@ -1898,9 +1925,9 @@ export default function Home() {
           >
             <IconPuzzle size={16} /> Library
           </button>
-        </div>
+        </div>}
 
-        <div className="sidebar-projects">
+        {workMode === "code" && <div className="sidebar-projects">
           <div className="side-section project-section-head">
             <span>Projects</span>
             <button onClick={() => openView("spaces")} title="Manage projects"><IconPlus size={13} /></button>
@@ -1920,7 +1947,7 @@ export default function Home() {
               </div>}
             </div>;
           })}
-        </div>
+        </div>}
 
         <div className="side-section">
           <span>History</span>
@@ -1987,25 +2014,26 @@ export default function Home() {
             </button>
           )}
           {LIBRARY_VIEWS.includes(view) ? <LibraryTabs view={view} setView={openView} /> : <div className="top-context">
-            <strong>{view === "chat" ? (sessions.find((session) => session.id === currentId)?.title ?? VIEW_TITLES.chat) : VIEW_TITLES[view]}</strong>
-            {view === "chat" && currentId && <span>Project workspace</span>}
+            <strong>{view === "chat" ? (sessions.find((session) => session.id === currentId)?.title ?? (workMode === "chat" ? "Chat" : VIEW_TITLES.chat)) : VIEW_TITLES[view]}</strong>
+            {view === "chat" && currentId && workMode === "code" && <span>Project workspace</span>}
+            {workMode === "chat" && <span>Free model · search</span>}
           </div>}
           <div className="spacer" />
-          {showBackgroundRun && (
+          {workMode === "code" && showBackgroundRun && (
             <button className="background-run" onClick={() => openView("tasks")} title="View background tasks">
               <span className="spinner" />
               <span>{activeTaskRuns.length > 1 ? `${activeTaskRuns.length} running` : "Working"}</span>
             </button>
           )}
-          {currentId && !previewOpen && (
+          {workMode === "code" && currentId && !previewOpen && (
             <button className="icon-btn" onClick={showPreview}>
               <IconEye size={15} /> Preview
             </button>
           )}
-          <div className="mode-toggle compact" aria-label="Execution source">
+          {workMode === "code" && <div className="mode-toggle compact" aria-label="Execution source">
             <button className={mode === "local" ? "on" : ""} onClick={() => switchMode("local")} title="Use local subscriptions">Local</button>
             <button className={mode === "byok" ? "on" : ""} onClick={() => switchMode("byok")} title="Use API keys">API</button>
-          </div>
+          </div>}
           <button className="top-icon" onClick={() => setShowSettings(true)} title="Settings"><IconSliders size={15} /></button>
         </div>
 
@@ -2047,8 +2075,10 @@ export default function Home() {
           <div className="center">
             <div className="home-intro">
               <span className="home-mark"><HyzrMark size={22} /></span>
-              <h1>What are you building?</h1>
-              <p>Describe the outcome. Hyzr Chat will plan the work, choose the right models, and build in an isolated project.</p>
+              <h1>{workMode === "chat" ? "Ask Hyzr anything" : "What are you building?"}</h1>
+              <p>{workMode === "chat"
+                ? "A fast, routed answer engine. Ask a question and Hyzr picks the right model. Switch to Code to build in a paired workspace."
+                : "Describe the outcome. Hyzr Chat will plan the work, choose the right models, and build in an isolated project."}</p>
             </div>
             {composer}
             <div className="suggestions">

@@ -226,6 +226,42 @@ select {
   color: var(--text-soft);
 }
 
+/* Top-level Chat / Code mode switch — the primary control of the app. */
+.workmode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  margin: 2px 0 10px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--panel-2);
+}
+.workmode-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.workmode-toggle button svg { color: var(--text-faint); transition: color 0.15s; }
+.workmode-toggle button.on {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.workmode-toggle button.on svg { color: var(--accent-ink); }
+.workmode-toggle button:not(.on):hover { color: var(--text-soft); }
+
 .new-btn {
   display: flex;
   align-items: center;
