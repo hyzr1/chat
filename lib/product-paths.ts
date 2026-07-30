@@ -23,10 +23,16 @@ export const STATE_DIRECTORY = existsSync(LEGACY_STATE_DIRECTORY)
   ? LEGACY_STATE_DIRECTORY
   : HYZR_CHAT_STATE_DIRECTORY;
 
-export const STATE_DATABASE = path.join(/*turbopackIgnore: true*/
-  STATE_DIRECTORY,
-  STATE_DIRECTORY === LEGACY_STATE_DIRECTORY ? "vmx.sqlite" : "chat.sqlite",
-);
+// Hosted/serverless: an in-memory DB per instance. No file means no lock
+// contention between Vercel's parallel build workers or between lambdas, and
+// the durable store has no role in hosted execution (that runs on paired
+// machines). Local installs keep their real on-disk database.
+export const STATE_DATABASE = hosted
+  ? ":memory:"
+  : path.join(/*turbopackIgnore: true*/
+      STATE_DIRECTORY,
+      STATE_DIRECTORY === LEGACY_STATE_DIRECTORY ? "vmx.sqlite" : "chat.sqlite",
+    );
 
 export const WORKSPACE_DIRECTORY = existsSync(LEGACY_WORKSPACE_ROOT)
   ? LEGACY_WORKSPACE_ROOT
