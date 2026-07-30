@@ -146,6 +146,8 @@ test("hosted computer setup is a compact self-pairing terminal download", async 
   }));
   await page.goto("/");
   await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
+  await expect(page.locator(".pair-cta-download")).toHaveAttribute("href", "/api/agent/download?platform=windows");
+  await expect(page.locator(".pair-cta-download")).toContainText("Download");
   await page.locator("button.agent-presence").click();
   await expect(page.getByRole("heading", { name: "Connect your computer" })).toBeVisible();
   const download = page.locator(".pair-download");
@@ -185,6 +187,12 @@ test("a known offline computer asks to reopen Hyzr instead of pairing again", as
   }));
   await page.goto("/");
   await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
+  await expect(page.locator(".pair-cta-download")).toHaveAttribute("href", "/api/agent/download?platform=windows");
+  const suggestionsBox = await page.locator(".suggestions").boundingBox();
+  const offlineBox = await page.locator(".pair-cta.known-offline").boundingBox();
+  expect(suggestionsBox).not.toBeNull();
+  expect(offlineBox).not.toBeNull();
+  expect(offlineBox!.y - (suggestionsBox!.y + suggestionsBox!.height)).toBeGreaterThanOrEqual(40);
   await page.locator("button.agent-presence").click();
   await expect(page.getByText("My PC is offline")).toBeVisible();
   await expect(page.getByText("Reopen Hyzr on your computer")).toBeVisible();
@@ -214,6 +222,7 @@ test("compact model controls are theme-safe and expose visual effort", async ({ 
   await page.setViewportSize({ width: 1440, height: 900 });
   await createTestAccount(page);
   await page.goto("/");
+  await expect(page.getByRole("link", { name: /^Code$/ })).toHaveCount(0);
   const chatComposerBox = await page.locator(".center .composer").boundingBox();
   await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
   await page.waitForTimeout(280);
@@ -233,8 +242,15 @@ test("compact model controls are theme-safe and expose visual effort", async ({ 
   expect(await openAiMark.evaluate((element) => getComputedStyle(element).color)).toBe("rgb(32, 33, 36)");
   await page.getByRole("button", { name: "More models" }).hover();
   await expect(page.locator(".simple-model-submenu")).toBeVisible();
+  const modelSubmenuBox = await page.locator(".simple-model-submenu").boundingBox();
+  expect(modelSubmenuBox).not.toBeNull();
+  expect(modelSubmenuBox!.y).toBeGreaterThanOrEqual(8);
+  expect(modelSubmenuBox!.y + modelSubmenuBox!.height).toBeLessThanOrEqual(892);
+  await page.mouse.move(24, 220);
+  await expect(page.locator(".simple-model-submenu")).toHaveCount(0);
   await page.getByRole("button", { name: "Choose model" }).click();
   await page.getByRole("button", { name: /Reasoning effort:/ }).click();
+  await expect(page.locator(".effort-help")).toHaveCount(0);
   const effortSlider = page.getByRole("slider", { name: "Reasoning effort" });
   await expect(effortSlider).toBeVisible();
   await effortSlider.fill("4");

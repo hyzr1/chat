@@ -148,14 +148,6 @@ export const IconGauge = (p: P) => (
   </Svg>
 );
 
-export const IconHelpCircle = (p: P) => (
-  <Svg {...p}>
-    <circle cx="12" cy="12" r="9" />
-    <path d="M9.7 9a2.5 2.5 0 0 1 4.75 1.1c0 1.9-2.45 2.15-2.45 3.65" />
-    <path d="M12 17.25h.01" />
-  </Svg>
-);
-
 export const IconFolder = (p: P) => (
   <Svg {...p}>
     <path d="M3 7.5a2 2 0 0 1 2-2h3.6l1.8 2H19a2 2 0 0 1 2 2v6.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />

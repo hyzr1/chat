@@ -38,7 +38,6 @@ import {
   IconCode,
   IconShield,
   IconGauge,
-  IconHelpCircle,
   IconRoute,
   IconTrash,
   IconClock,
@@ -2277,7 +2276,6 @@ export default function Home() {
               }}
               aria-label={`Reasoning effort: ${effort === "xhigh" ? "Extra" : effort[0].toUpperCase() + effort.slice(1)}`}
             >
-              <IconGauge size={14} />
               <span>{effort === "xhigh" ? "Extra" : effort[0].toUpperCase() + effort.slice(1)}</span>
               <IconChevron size={13} className="chev" />
             </button>
@@ -2507,18 +2505,12 @@ export default function Home() {
             <button className={mode === "local" ? "on" : ""} onClick={() => switchMode("local")} title="Use local subscriptions">Local</button>
             <button className={mode === "byok" ? "on" : ""} onClick={() => switchMode("byok")} title="Use API keys">API</button>
           </div>}
-          {workMode === "chat" && <div className="top-links">
-            <a className="top-link" href="https://code.hyzr.ai" target="_blank" rel="noopener" title="Learn to code — Hyzr Code">
-              Code <IconExternal size={12} />
-            </a>
-          </div>}
           {workMode === "code" && (
             <button
               className={`agent-presence ${agentPaired ? "online" : "offline"}`}
               onClick={() => requireAuth(() => openPair())}
               title={agentPaired ? `Connected to ${agentInfo?.host || "your computer"}` : agentInfo ? "Reopen Hyzr on your computer" : "Connect your computer"}
             >
-              <IconWindows size={13} className="agent-presence-platform" />
               <i />
               <span>{agentPaired ? agentInfo?.host || "Computer connected" : agentInfo ? "Computer offline" : "Connect computer"}</span>
               <IconChevron size={11} />
@@ -2607,7 +2599,7 @@ export default function Home() {
             </div>}
             {workMode === "code" && (agentPaired ? (
               <button className="agent-ready-card" onClick={openPair}>
-                <span className="agent-ready-icon"><IconWindows size={15} /></span>
+                <span className="agent-ready-icon"><IconTerminal size={15} /></span>
                 <span className="agent-ready-copy">
                   <b>Connected to {agentInfo?.host || "your computer"}</b>
                   <span>{pairedToolLabel || "Local tools ready"}</span>
@@ -2621,7 +2613,12 @@ export default function Home() {
                   <b>{agentInfo ? "Your computer is offline" : "Connect your computer"}</b>
                   <span>{agentInfo ? "Reopen Hyzr to continue in the same projects." : "One tiny terminal file. Your projects stay on your computer."}</span>
                 </span>
-                <button className="pair-cta-btn" onClick={openPair}>{agentInfo ? "How to reconnect" : "Connect"}</button>
+                <span className="pair-cta-actions">
+                  <a className="pair-cta-download" href="/api/agent/download?platform=windows" download>
+                    <IconWindows size={14} /> Download
+                  </a>
+                  <button className="pair-cta-btn" onClick={openPair}>{agentInfo ? "Reconnect" : "Pair"}</button>
+                </span>
               </div>
             ))}
           </div>
@@ -2909,7 +2906,7 @@ function ModelMenu({
   if (forced && !featured.some((model) => model.id === forced.id)) featured = [forced, ...featured.slice(0, 3)];
   const moreModels = models.filter((model) => !featured.some((featuredModel) => featuredModel.id === model.id));
   return (
-    <div className="menu simple-model-menu">
+    <div className="menu simple-model-menu" onMouseLeave={() => setShowMore(false)}>
       <div className="menu-mobile-head"><span /><strong>Models</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
       <div className="simple-menu-title">Models</div>
       <button className={`simple-model-row ${value === "auto" ? "selected" : ""}`} onClick={() => onPick("auto")}>
@@ -2968,9 +2965,6 @@ function EffortMenu({ value, onPick, onClose }: { value: Effort; onPick: (effort
       <div className="effort-menu-head">
         <span>Effort</span>
         <strong>{effortName(value)}</strong>
-        <span className="effort-help" title="Higher effort gives the model more time to reason.">
-          <IconHelpCircle size={17} />
-        </span>
       </div>
       <div className="effort-direction"><span>Faster</span><span>Smarter</span></div>
       <div className="effort-meter" style={{ "--effort-progress": `${index * 20}%` } as any}>
