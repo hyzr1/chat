@@ -106,3 +106,92 @@ test("paired relay preserves workspace identity and scopes results to the accoun
   expect(restored.ok()).toBeTruthy();
   await agent.dispose();
 });
+
+test("terminal-initiated device pairing is pending until browser approval", async ({ request, baseURL }) => {
+  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const agent = await playwrightRequest.newContext({ baseURL });
+  const started = await agent.post("/api/agent/device/start", {
+    data: {
+      agent: {
+        protocol: 3,
+        version: "1.2.0-test",
+        host: "device-flow-test",
+        platform: "win32",
+        node: process.version,
+        claude: true,
+        codex: true,
+        git: true,
+        gh: true,
+        engine: "claude+codex",
+        workspaceRoot: "C:\\Users\\test\\Hyzr",
+        permissionMode: "full-access",
+      },
+    },
+  });
+  expect(started.ok()).toBeTruthy();
+  const flow = await started.json();
+  expect(flow.userCode).toMatch(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
+  expect(flow.deviceSecret.length).toBeGreaterThan(30);
+  expect(flow.verificationUriComplete).toContain(encodeURIComponent(flow.userCode));
+
+  const pending = await agent.post("/api/agent/device/token", { data: { deviceSecret: flow.deviceSecret } });
+  expect(pending.status()).toBe(202);
+  await expect(pending.json()).resolves.toMatchObject({ status: "authorization_pending" });
+
+  const signup = await request.post("/api/auth/signup", {
+    data: { email: `device-${nonce}@example.test`, password: `hyzr-device-${nonce}` },
+  });
+  expect(signup.ok()).toBeTruthy();
+  const inspected = await request.get(`/api/agent/device/approve?code=${encodeURIComponent(flow.userCode)}`);
+  expect(inspected.ok()).toBeTruthy();
+  await expect(inspected.json()).resolves.toMatchObject({
+    status: "pending",
+    agent: { host: "device-flow-test", protocol: 3, permissionMode: "full-access" },
+  });
+
+  const approved = await request.post("/api/agent/device/approve", { data: { code: flow.userCode } });
+  expect(approved.ok()).toBeTruthy();
+  const approvalPayload = await approved.json();
+  expect(approvalPayload).toMatchObject({ ok: true, protocol: 3 });
+  expect(approvalPayload.token).toBeUndefined();
+
+  const exchanged = await agent.post("/api/agent/device/token", { data: { deviceSecret: flow.deviceSecret } });
+  expect(exchanged.ok()).toBeTruthy();
+  const { token } = await exchanged.json();
+  expect(token).toMatch(/^[a-f0-9]{48}$/);
+
+  const heartbeat = await agent.post("/api/agent/heartbeat", { headers: { Authorization: `Bearer ${token}` } });
+  expect(heartbeat.ok()).toBeTruthy();
+  const firstJobId = `device-job-${nonce}`;
+  expect((await request.post("/api/agent/enqueue", { data: { job: {
+    id: firstJobId, conversationId: firstJobId, workspaceId: firstJobId,
+    prompt: "Verify device pairing", history: [],
+  } } })).ok()).toBeTruthy();
+  const firstPoll = await agent.get("/api/agent/poll", { headers: { Authorization: `Bearer ${token}` } });
+  await expect(firstPoll.json()).resolves.toMatchObject({ job: { id: firstJobId } });
+
+  // Approving a replacement computer is deterministic. A late heartbeat from
+  // the old launcher must not steal the account mapping back.
+  const replacementStart = await agent.post("/api/agent/device/start", {
+    data: { agent: {
+      protocol: 3, version: "1.2.0-test", host: "replacement-device",
+      platform: "win32", node: process.version, claude: false, codex: true,
+      git: true, gh: true, engine: "codex", workspaceRoot: "C:\\Hyzr",
+      permissionMode: "full-access",
+    } },
+  });
+  const replacementFlow = await replacementStart.json();
+  expect((await request.post("/api/agent/device/approve", { data: { code: replacementFlow.userCode } })).ok()).toBeTruthy();
+  const replacementExchange = await agent.post("/api/agent/device/token", { data: { deviceSecret: replacementFlow.deviceSecret } });
+  const replacementToken = (await replacementExchange.json()).token;
+  expect((await agent.post("/api/agent/heartbeat", { headers: { Authorization: `Bearer ${replacementToken}` } })).ok()).toBeTruthy();
+  expect((await agent.post("/api/agent/heartbeat", { headers: { Authorization: `Bearer ${token}` } })).ok()).toBeTruthy();
+  const replacementJobId = `replacement-job-${nonce}`;
+  expect((await request.post("/api/agent/enqueue", { data: { job: {
+    id: replacementJobId, conversationId: replacementJobId, workspaceId: replacementJobId,
+    prompt: "Verify replacement pairing", history: [],
+  } } })).ok()).toBeTruthy();
+  const replacementPoll = await agent.get("/api/agent/poll", { headers: { Authorization: `Bearer ${replacementToken}` } });
+  await expect(replacementPoll.json()).resolves.toMatchObject({ job: { id: replacementJobId } });
+  await agent.dispose();
+});

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { kvGet, kvSet, newToken } from "@/lib/relay-store";
 import { AGENT_PROTOCOL_VERSION } from "@/lib/agent-protocol";
 import { takeRateLimit } from "@/lib/rate-limit";
+import { registerAgent } from "@/lib/agent-record";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,29 +33,11 @@ export async function POST(request: NextRequest) {
   if (pairing.status === "paired") return NextResponse.json({ error: "That code has already been used." }, { status: 409 });
 
   const token = newToken();
-  const cleanAgent = {
-    protocol: Number(agent?.protocol) || 1,
-    host: String(agent?.host || "your machine"),
-    platform: String(agent?.platform || ""),
-    arch: String(agent?.arch || ""),
-    version: String(agent?.version || ""),
-    claude: Boolean(agent?.claude),
-    codex: Boolean(agent?.codex),
-    git: Boolean(agent?.git),
-    gh: Boolean(agent?.gh),
-    node: String(agent?.node || ""),
-    workspaceRoot: String(agent?.workspaceRoot || ""),
-    permissionMode: agent?.permissionMode === "full-access" ? "full-access" : "workspace",
-    engine: ["claude", "codex", "claude+codex"].includes(String(agent?.engine))
-      ? String(agent?.engine)
-      : (agent?.claude && agent?.codex ? "claude+codex" : agent?.claude ? "claude" : agent?.codex ? "codex" : ""),
-  };
-  await kvSet(`agent:${token}`, { token, agent: cleanAgent, pairedAt: Date.now(), lastSeen: Date.now() }, 60 * 60 * 24 * 30);
+  const record = await registerAgent(token, pairing.accountId, agent);
   // The code is a short-lived bootstrap secret. Normal browser requests resolve
   // the paired machine through the authenticated account after this point.
   await kvSet(`token:${normalizedCode}`, token, 900);
-  if (pairing.accountId) await kvSet(`account-agent:${pairing.accountId}`, token, 60 * 60 * 24 * 30);
-  await kvSet(key, { ...pairing, status: "paired", agent: cleanAgent }, 900);
+  await kvSet(key, { ...pairing, status: "paired", agent: record.agent }, 900);
 
   return NextResponse.json({ token, protocol: AGENT_PROTOCOL_VERSION }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { kvGet, kvSet, queuePush } from "@/lib/relay-store";
+import { kvGet, queuePush } from "@/lib/relay-store";
 import { tokenFingerprint } from "@/lib/paired-agent";
+import { getAgentRecord, touchAgent } from "@/lib/agent-record";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,11 +11,11 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const { token, jobId, type, text, data } = await request.json().catch(() => ({} as any));
   if (!token || !jobId || !type) return NextResponse.json({ error: "Missing fields." }, { status: 400 });
-  const record = await kvGet(`agent:${token}`);
+  const record = await getAgentRecord(token);
   if (!record) return NextResponse.json({ error: "Unknown agent token." }, { status: 401 });
   // Result delivery is also proof that the launcher is alive. This keeps
   // launchers from older releases online during long model/tool operations.
-  await kvSet(`agent:${token}`, { ...(record as Record<string, unknown>), lastSeen: Date.now() }, 60 * 60 * 24 * 30);
+  await touchAgent(token, record);
   const owner = await kvGet<string>(`job-owner:${jobId}`);
   if (owner !== tokenFingerprint(token)) return NextResponse.json({ error: "Unknown job." }, { status: 404 });
   const allowed = new Set(["status", "text", "tool", "usage", "result", "done", "error"]);

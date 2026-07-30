@@ -4,7 +4,7 @@ import { takeRateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
-    const rate = await takeRateLimit(request, "auth-signup", 5, 60 * 60);
+    const rate = await takeRateLimit(request, "auth-signup", process.env.HYZR_TEST === "1" ? 1_000 : 5, 60 * 60);
     if (!rate.allowed) return NextResponse.json({ error: "Too many account attempts. Try again later." }, { status: 429, headers: { "Retry-After": String(rate.retryAfter) } });
     const body = await request.json();
     const user = await createUser(body.email, body.password);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { kvGet, kvSet } from "@/lib/relay-store";
+import { getAgentRecord, touchAgent } from "@/lib/agent-record";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,9 +10,8 @@ export async function POST(request: NextRequest) {
   const token = bearer || body?.token || "";
   if (!token) return NextResponse.json({ error: "Missing token." }, { status: 400 });
 
-  const key = `agent:${token}`;
-  const record = await kvGet<Record<string, unknown>>(key);
+  const record = await getAgentRecord(token);
   if (!record) return NextResponse.json({ error: "Unknown agent token." }, { status: 401 });
-  await kvSet(key, { ...record, lastSeen: Date.now() }, 60 * 60 * 24 * 30);
+  await touchAgent(token, record);
   return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
 }

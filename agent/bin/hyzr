@@ -5,6 +5,8 @@ HYZR_URL="${HYZR_URL:-https://chat-beta-weld.vercel.app}"
 HYZR_DIR="${HOME}/.hyzr/agent"
 HYZR_RUNTIME="${HYZR_DIR}/hyzr-agent.mjs"
 HYZR_TEMP="${HYZR_DIR}/hyzr-agent.tmp"
+HYZR_SUM="${HYZR_DIR}/hyzr-agent.sha256.tmp"
+HYZR_BACKUP="${HYZR_DIR}/hyzr-agent.backup.mjs"
 
 if ! command -v node >/dev/null 2>&1; then
   printf '\nHyzr needs Node.js 18 or newer.\nInstall it from https://nodejs.org and run this file again.\n\n'
@@ -13,10 +15,30 @@ fi
 
 mkdir -p "$HYZR_DIR"
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "${HYZR_URL}/downloads/hyzr-agent.mjs" -o "$HYZR_TEMP" && mv "$HYZR_TEMP" "$HYZR_RUNTIME"
+  curl -fsSL --connect-timeout 15 "${HYZR_URL}/downloads/hyzr-agent.sha256" -o "$HYZR_SUM" &&
+    curl -fsSL --connect-timeout 15 "${HYZR_URL}/downloads/hyzr-agent.mjs" -o "$HYZR_TEMP"
 elif command -v wget >/dev/null 2>&1; then
-  wget -q "${HYZR_URL}/downloads/hyzr-agent.mjs" -O "$HYZR_TEMP" && mv "$HYZR_TEMP" "$HYZR_RUNTIME"
+  wget -q --timeout=15 "${HYZR_URL}/downloads/hyzr-agent.sha256" -O "$HYZR_SUM" &&
+    wget -q --timeout=15 "${HYZR_URL}/downloads/hyzr-agent.mjs" -O "$HYZR_TEMP"
 fi
+
+if [ -f "$HYZR_TEMP" ] && [ -f "$HYZR_SUM" ]; then
+  EXPECTED="$(awk '{print $1}' "$HYZR_SUM")"
+  if command -v shasum >/dev/null 2>&1; then
+    ACTUAL="$(shasum -a 256 "$HYZR_TEMP" | awk '{print $1}')"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL="$(sha256sum "$HYZR_TEMP" | awk '{print $1}')"
+  else
+    ACTUAL=""
+  fi
+  if [ -n "$ACTUAL" ] && [ "$EXPECTED" = "$ACTUAL" ] && node --check "$HYZR_TEMP" >/dev/null 2>&1; then
+    [ -f "$HYZR_RUNTIME" ] && cp "$HYZR_RUNTIME" "$HYZR_BACKUP"
+    mv "$HYZR_TEMP" "$HYZR_RUNTIME"
+  else
+    rm -f "$HYZR_TEMP"
+  fi
+fi
+rm -f "$HYZR_SUM"
 
 if [ ! -f "$HYZR_RUNTIME" ]; then
   printf '\nHyzr could not download its tiny runtime. Check your connection and try again.\n\n'

@@ -1,6 +1,6 @@
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -8,12 +8,14 @@ import readline from "node:readline";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const PROTOCOL = 2;
-const VERSION = "1.1.4";
+const PROTOCOL = 3;
+const VERSION = "1.2.0";
 const IS_WIN = process.platform === "win32";
 const DEFAULT_ROOT = path.join(os.homedir(), "Hyzr");
 const STATE_ROOT = path.join(os.homedir(), ".hyzr", "agent");
 const CONFIG_FILE = path.join(STATE_ROOT, "config.json");
+const CONFIG_BACKUP_FILE = path.join(STATE_ROOT, "config.backup.json");
+const LOCK_FILE = path.join(STATE_ROOT, "runtime.lock");
 const SESSIONS_FILE = path.join(STATE_ROOT, "sessions.json");
 const IGNORE = new Set(["node_modules", ".git", ".next", ".cache"]);
 const previewServers = new Map();
@@ -98,6 +100,57 @@ async function writeJson(file, value) {
   const temporary = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   await writeFile(temporary, JSON.stringify(value, null, 2), { encoding: "utf8", mode: 0o600 });
   await rename(temporary, file);
+}
+
+async function readAgentConfig() {
+  const primary = await readJson(CONFIG_FILE, null);
+  if (primary && typeof primary === "object") return primary;
+  const backup = await readJson(CONFIG_BACKUP_FILE, null);
+  if (backup && typeof backup === "object") {
+    await writeJson(CONFIG_FILE, backup).catch(() => {});
+    return backup;
+  }
+  return {};
+}
+
+async function writeAgentConfig(value) {
+  const current = await readJson(CONFIG_FILE, null);
+  if (current && typeof current === "object") {
+    await copyFile(CONFIG_FILE, CONFIG_BACKUP_FILE).catch(() => {});
+  }
+  await writeJson(CONFIG_FILE, value);
+}
+
+function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+async function acquireRuntimeLock(lockFile = LOCK_FILE) {
+  await mkdir(path.dirname(lockFile), { recursive: true });
+  const nonce = randomBytes(12).toString("hex");
+  const payload = { pid: process.pid, nonce, version: VERSION, startedAt: Date.now() };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const handle = await open(lockFile, "wx", 0o600);
+      await handle.writeFile(JSON.stringify(payload));
+      await handle.close();
+      return async () => {
+        const current = await readJson(lockFile, null);
+        if (current?.nonce === nonce) await unlink(lockFile).catch(() => {});
+      };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      const existing = await readJson(lockFile, null);
+      if (existing?.pid && processIsAlive(Number(existing.pid))) {
+        throw Object.assign(new Error(`Hyzr is already running in process ${existing.pid}. Keep that terminal open.`), { code: "ALREADY_RUNNING" });
+      }
+      await unlink(lockFile).catch(() => {});
+    }
+  }
+  throw new Error("Could not acquire the Hyzr runtime lock.");
 }
 
 async function ask(question, fallback = "") {
@@ -232,6 +285,59 @@ async function post(relay, pathname, body, attempts = 4) {
     }
   }
   throw lastError;
+}
+
+function openExternalUrl(url) {
+  try {
+    const child = IS_WIN
+      ? spawn("rundll32.exe", ["url.dll,FileProtocolHandler", url], { detached: true, stdio: "ignore", windowsHide: true })
+      : process.platform === "darwin"
+        ? spawn("open", [url], { detached: true, stdio: "ignore" })
+        : spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function deviceAuthorize(relay, capabilities, options = {}) {
+  while (!options.signal?.aborted) {
+    const flow = await post(relay, "/api/agent/device/start", { agent: capabilities });
+    options.onCode?.(flow);
+    if (options.openBrowser !== false) openExternalUrl(flow.verificationUriComplete);
+    const deadline = Date.now() + Number(flow.expiresIn || 900) * 1000;
+    const interval = Math.max(
+      Number(options.minimumPollMs ?? 2_000),
+      Math.max(0, Number(flow.interval || 3)) * 1000,
+    );
+    while (!options.signal?.aborted && Date.now() < deadline) {
+      await sleep(interval);
+      let response;
+      try {
+        response = await fetch(`${relay}/api/agent/device/token`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ deviceSecret: flow.deviceSecret }),
+          signal: AbortSignal.timeout(12_000),
+        });
+      } catch (error) {
+        options.onWait?.(error instanceof Error ? error.message : String(error));
+        continue;
+      }
+      if (response.status === 202) continue;
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.token) return payload.token;
+      if (response.status === 404 || payload.error === "expired_token") break;
+      if (response.status === 429) {
+        await sleep(Math.max(3, Number(response.headers.get("retry-after") || 5)) * 1000);
+        continue;
+      }
+      options.onWait?.(payload.error || `Pairing service returned ${response.status}.`);
+    }
+    if (!options.signal?.aborted) options.onExpired?.();
+  }
+  throw Object.assign(new Error("Pairing cancelled."), { code: "ABORTED" });
 }
 
 function runProcess(command, args, prompt, cwd, onLine) {
@@ -848,13 +954,9 @@ async function handleRun(job, context) {
   }
 }
 
-export async function startAgent(options = {}) {
-  const saved = options.savedConfig || await readJson(CONFIG_FILE, {});
-  const relay = cleanRelay(options.relay || saved.relay || "https://chat.hyzr.ai");
-  const workspaceRoot = path.resolve(options.workspaceRoot || saved.workspaceRoot || DEFAULT_ROOT);
-  const permissionMode = options.permissionMode || saved.permissionMode || "workspace";
+export async function detectAgentEnvironment(options = {}) {
+  const workspaceRoot = path.resolve(options.workspaceRoot || DEFAULT_ROOT);
   await mkdir(workspaceRoot, { recursive: true });
-
   const tools = {
     claude: await locate("claude"),
     codex: await locate("codex"),
@@ -863,27 +965,42 @@ export async function startAgent(options = {}) {
     npm: await locate("npm"),
   };
   if (!tools.claude && !tools.codex) throw new Error("Install and sign in to Claude Code or Codex before pairing Hyzr.");
-  const capabilities = {
-    protocol: PROTOCOL,
-    version: VERSION,
-    host: os.hostname(),
-    platform: process.platform,
-    arch: process.arch,
-    node: process.version,
-    claude: Boolean(tools.claude),
-    codex: Boolean(tools.codex),
-    git: Boolean(tools.git),
-    gh: Boolean(tools.gh),
-    engine: tools.claude && tools.codex ? "claude+codex" : tools.claude ? "claude" : "codex",
-    workspaceRoot,
-    permissionMode,
-    versions: {
-      claude: await commandVersion(tools.claude),
-      codex: await commandVersion(tools.codex),
-      git: await commandVersion(tools.git),
-      gh: await commandVersion(tools.gh),
+  const permissionMode = options.permissionMode || "full-access";
+  return {
+    tools,
+    capabilities: {
+      protocol: PROTOCOL,
+      version: VERSION,
+      host: os.hostname(),
+      platform: process.platform,
+      arch: process.arch,
+      node: process.version,
+      claude: Boolean(tools.claude),
+      codex: Boolean(tools.codex),
+      git: Boolean(tools.git),
+      gh: Boolean(tools.gh),
+      engine: tools.claude && tools.codex ? "claude+codex" : tools.claude ? "claude" : "codex",
+      workspaceRoot,
+      permissionMode,
+      versions: {
+        claude: await commandVersion(tools.claude),
+        codex: await commandVersion(tools.codex),
+        git: await commandVersion(tools.git),
+        gh: await commandVersion(tools.gh),
+      },
     },
   };
+}
+
+export async function startAgent(options = {}) {
+  const saved = options.savedConfig || await readAgentConfig();
+  const relay = cleanRelay(options.relay || saved.relay || "https://chat.hyzr.ai");
+  const workspaceRoot = path.resolve(options.workspaceRoot || saved.workspaceRoot || DEFAULT_ROOT);
+  const permissionMode = options.permissionMode || saved.permissionMode || "workspace";
+  await mkdir(workspaceRoot, { recursive: true });
+
+  const environment = options.environment || await detectAgentEnvironment({ workspaceRoot, permissionMode });
+  const { tools, capabilities } = environment;
 
   const code = String(options.code || saved.pendingCode || "").toUpperCase();
   let token = options.token || saved.token || "";
@@ -894,7 +1011,7 @@ export async function startAgent(options = {}) {
   if (!token) throw new Error("A pairing code is required.");
   const persisted = { relay, token, workspaceRoot, permissionMode, pairedAt: Date.now() };
   if (options.persistConfig) await options.persistConfig(persisted);
-  else await writeJson(CONFIG_FILE, persisted);
+  else await writeAgentConfig(persisted);
   options.onToken?.(token);
 
   // Polling pauses while Claude/Codex is working. Presence must not: otherwise
@@ -946,10 +1063,7 @@ export async function startAgent(options = {}) {
         signal: AbortSignal.timeout(20_000),
       });
       if (response.status === 401) {
-        const unpaired = { relay, workspaceRoot, permissionMode, pairedAt: persisted.pairedAt };
-        if (options.persistConfig) await options.persistConfig(unpaired);
-        else await writeJson(CONFIG_FILE, unpaired);
-        throw new Error("Pairing expired. Run Hyzr again and enter a new code.");
+        throw Object.assign(new Error("The saved pairing was rejected."), { code: "PAIRING_EXPIRED" });
       }
       if (!response.ok) throw new Error(`Relay returned ${response.status}.`);
       const { job } = await response.json();
@@ -968,7 +1082,7 @@ export async function startAgent(options = {}) {
       }
       await writeChain;
       } catch (error) {
-        if (/^Pairing expired\./.test(error instanceof Error ? error.message : String(error))) throw error;
+        if (error?.code === "PAIRING_EXPIRED") throw error;
         failures += 1;
         options.onStatus?.({ connected: false, error: error instanceof Error ? error.message : String(error) });
         await sleep(Math.min(30_000, 1000 * 2 ** Math.min(failures, 5)) + Math.floor(Math.random() * 300));
@@ -986,7 +1100,7 @@ function argumentsMap() {
   }));
 }
 
-export async function runAgentCli() {
+async function runAgentCliLegacy() {
   const args = argumentsMap();
   const saved = await readJson(CONFIG_FILE, {});
   const relay = args.url || process.env.HYZR_URL || saved.relay || "https://chat.hyzr.ai";
@@ -1060,11 +1174,178 @@ export async function runAgentCli() {
   }
 }
 
-export async function loadAgentConfig() {
-  return readJson(CONFIG_FILE, {});
+export async function runAgentCli() {
+  const args = argumentsMap();
+  if ("version" in args) {
+    console.log(`Hyzr Agent ${VERSION} (protocol ${PROTOCOL})`);
+    return;
+  }
+
+  let releaseLock;
+  try {
+    releaseLock = await acquireRuntimeLock();
+  } catch (error) {
+    if (error?.code === "ALREADY_RUNNING") {
+      console.log(`\n  ${error.message}\n`);
+      return;
+    }
+    throw error;
+  }
+
+  const saved = await readAgentConfig();
+  const relay = args.url || process.env.HYZR_URL || saved.relay || "https://chat.hyzr.ai";
+  let legacyCode = String(args.code || process.env.HYZR_CODE || "").replace(/\s/g, "").toUpperCase();
+  const workspaceRoot = path.resolve(args.workspace || saved.workspaceRoot || DEFAULT_ROOT);
+  const permissionMode = args.restricted === "true" ? "workspace" : (saved.permissionMode || "full-access");
+  await mkdir(workspaceRoot, { recursive: true });
+
+  const colors = process.stdout.isTTY && !process.env.NO_COLOR;
+  const paint = (code, value) => colors ? `\x1b[${code}m${value}\x1b[0m` : value;
+  const muted = (value) => paint("90", value);
+  const green = (value) => paint("32", value);
+  const cyan = (value) => paint("36", value);
+  const yellow = (value) => paint("33", value);
+  const environment = await detectAgentEnvironment({ workspaceRoot, permissionMode });
+  const toolNames = [
+    environment.capabilities.claude && "Claude",
+    environment.capabilities.codex && "Codex",
+    environment.capabilities.git && "Git",
+    environment.capabilities.gh && "GitHub",
+  ].filter(Boolean);
+
+  console.log("");
+  console.log(`  ${paint("1", "HYZR AGENT")} ${muted(`v${VERSION}`)}`);
+  console.log(`  ${muted("────────────────────────────────────────")}`);
+  console.log(`  ${muted("Computer")}   ${environment.capabilities.host}`);
+  console.log(`  ${muted("Projects")}   ${workspaceRoot}`);
+  console.log(`  ${muted("Tools")}      ${toolNames.join(" · ") || "No coding provider found"}`);
+  console.log(`  ${muted("Access")}     ${permissionMode === "full-access" ? "Full local access" : "Project workspace only"}`);
+  console.log("");
+
+  if ("doctor" in args) {
+    console.log(`  ${green("●")} Runtime is healthy`);
+    console.log(`  ${muted("Relay")}      ${cleanRelay(relay)}`);
+    console.log(`  ${muted("Config")}     ${CONFIG_FILE}`);
+    console.log("");
+    await releaseLock();
+    return;
+  }
+
+  let connectionState = "";
+  let activeToken = "";
+  let stopping = false;
+  const controller = new AbortController();
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    controller.abort();
+    sweepPreviewServers(true);
+    if (activeToken) {
+      try {
+        await fetch(`${cleanRelay(relay)}/api/agent/disconnect`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: activeToken }),
+          signal: AbortSignal.timeout(1500),
+        });
+      } catch {}
+    }
+    await releaseLock?.();
+    process.exit(0);
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  process.once("SIGHUP", stop);
+  try {
+    if (args.reset === "true") {
+      await writeAgentConfig({ relay: cleanRelay(relay), workspaceRoot, permissionMode });
+    }
+    while (!controller.signal.aborted) {
+      const current = await readAgentConfig();
+      let token = current.token || "";
+      try {
+        if (!token && !legacyCode) {
+          token = await deviceAuthorize(cleanRelay(relay), environment.capabilities, {
+            signal: controller.signal,
+            openBrowser: args.browser !== "false",
+            onCode(flow) {
+              connectionState = "pairing";
+              console.log(`  ${yellow("●")} Pair this computer`);
+              console.log(`  ${muted("Code")}       ${paint("1;36", flow.userCode)}`);
+              console.log(`  ${muted("Browser")}    ${cyan(flow.verificationUriComplete)}`);
+              console.log(`  ${muted("Waiting for approval… A new code appears automatically if this one expires.")}`);
+              console.log("");
+            },
+            onExpired() {
+              console.log(`  ${yellow("↻")} Code expired — generating a fresh one…`);
+            },
+            onWait(message) {
+              if (connectionState !== "pair-wait") {
+                connectionState = "pair-wait";
+                console.log(`  ${yellow("↻")} Pairing service unavailable (${message}). Retrying…`);
+              }
+            },
+          });
+          activeToken = token;
+          await writeAgentConfig({ relay: cleanRelay(relay), token, workspaceRoot, permissionMode, pairedAt: Date.now() });
+          console.log(`  ${green("✓")} Approved securely`);
+        }
+
+        await startAgent({
+          relay,
+          code: legacyCode,
+          token,
+          savedConfig: current,
+          environment,
+          workspaceRoot,
+          permissionMode,
+          signal: controller.signal,
+          persistConfig: writeAgentConfig,
+          onToken(nextToken) {
+            activeToken = nextToken;
+            legacyCode = "";
+          },
+          onStatus(status) {
+            if (status.connected && connectionState !== "connected") {
+              connectionState = "connected";
+              console.log(`  ${green("●")} Connected — build from the web or your phone`);
+              console.log(`  ${muted("The launcher reconnects automatically. Press Ctrl+C to stop.")}`);
+              console.log("");
+            } else if (!status.connected && connectionState !== "reconnecting") {
+              connectionState = "reconnecting";
+              console.log(`  ${yellow("↻")} Connection interrupted — retrying automatically`);
+            }
+          },
+        });
+        break;
+      } catch (error) {
+        if (controller.signal.aborted || error?.code === "ABORTED") break;
+        if (error?.code === "PAIRING_EXPIRED") {
+          activeToken = "";
+          connectionState = "reauthorizing";
+          await writeAgentConfig({ relay: cleanRelay(relay), workspaceRoot, permissionMode });
+          console.log(`  ${yellow("↻")} Pairing needs approval again — creating a fresh code…`);
+          continue;
+        }
+        connectionState = "startup-retry";
+        console.log(`  ${yellow("↻")} ${error instanceof Error ? error.message : String(error)}`);
+        console.log(`  ${muted("Retrying in 5 seconds…")}`);
+        await sleep(5_000);
+      }
+    }
+  } finally {
+    process.removeListener("SIGINT", stop);
+    process.removeListener("SIGTERM", stop);
+    process.removeListener("SIGHUP", stop);
+    await releaseLock?.();
+  }
 }
 
-export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, transcript, previewEntry, previewPortFor, previewHostArgs, previewListenerPidsFromNetstat, privateLanAddress, startPreviewServer, sweepPreviewServers, streamSeparator, specialistPlan };
+export async function loadAgentConfig() {
+  return readAgentConfig();
+}
+
+export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, transcript, previewEntry, previewPortFor, previewHostArgs, previewListenerPidsFromNetstat, privateLanAddress, startPreviewServer, sweepPreviewServers, streamSeparator, specialistPlan, processIsAlive, acquireRuntimeLock, deviceAuthorize };
 
 runAgentCli().catch((error) => {
   console.error("\n  Hyzr stopped —", error instanceof Error ? error.message : error);

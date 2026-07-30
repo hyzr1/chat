@@ -13,5 +13,6 @@ export default defineConfig({
     url: `${testBaseUrl}/api/health`,
     reuseExistingServer: true,
     timeout: 120_000,
+    env: { ...process.env, HYZR_TEST: "1" },
   },
 });

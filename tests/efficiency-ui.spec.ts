@@ -2,14 +2,10 @@ import { expect, test } from "@playwright/test";
 
 async function createTestAccount(page: import("@playwright/test").Page) {
   const credentials = {
-    email: "hyzr-playwright@example.test",
+    email: `hyzr-playwright-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`,
     password: "hyzr-playwright-password",
   };
-  let response = await page.request.post("/api/auth/login", { data: credentials });
-  if (response.ok()) return;
-  response = await page.request.post("/api/auth/signup", { data: credentials });
-  if (response.ok()) return;
-  response = await page.request.post("/api/auth/login", { data: credentials });
+  const response = await page.request.post("/api/auth/signup", { data: credentials });
   expect(response.ok()).toBeTruthy();
 }
 
@@ -91,23 +87,38 @@ test("mobile pairing gate is usable and contained", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
-test("hosted computer setup is a compact terminal download and code", async ({ page }) => {
+test("terminal device approval is clear and mobile-safe", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/agent/device/approve?code=ABCD-EFGH", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      code: "ABCD-EFGH",
+      status: "pending",
+      account: { email: "developer@example.test" },
+      agent: {
+        host: "Developer PC", platform: "win32", version: "1.2.0",
+        workspaceRoot: "C:\\Users\\developer\\Hyzr",
+        claude: true, codex: true, git: true, gh: true,
+      },
+    }),
+  }));
+  await page.goto("/pair/device?code=ABCD-EFGH");
+  await expect(page.getByRole("heading", { name: "Connect this computer" })).toBeVisible();
+  const codeInput = page.getByLabel("Pairing code");
+  await expect(codeInput).toBeVisible();
+  expect(await codeInput.inputValue()).toBe("ABCD-EFGH");
+  await expect(page.getByRole("button", { name: "Connect Developer PC" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
+test("hosted computer setup is a compact self-pairing terminal download", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await createTestAccount(page);
   await page.route("**/api/setup", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({ hosted: true, platform: "", agentConnected: false, agent: null, ready: false }),
-  }));
-  await page.route("**/api/agent/code", (route) => route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({ code: "ABC123" }),
-  }));
-  await page.route("**/api/agent/status**", (route) => route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({ status: "waiting" }),
   }));
   await page.goto("/");
   await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
@@ -116,8 +127,9 @@ test("hosted computer setup is a compact terminal download and code", async ({ p
   const download = page.locator(".pair-download");
   await expect(download).toContainText(/Download hyzr/);
   await expect(download).toHaveAttribute("href", /\/api\/agent\/download\?platform=/);
-  await expect(page.locator(".pair-code > div code")).toHaveText(/[A-Z0-9]{6}/);
   await expect(page.getByText("Tiny terminal launcher")).toBeVisible();
+  await expect(page.getByText("Open the tiny launcher")).toBeVisible();
+  await expect(page.getByText(/shows a secure one-time code/i)).toBeVisible();
   const box = await page.locator(".pair-sheet").boundingBox();
   expect(box).not.toBeNull();
   expect(box!.width).toBeLessThanOrEqual(390);

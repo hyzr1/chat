@@ -1164,28 +1164,23 @@ export default function Home() {
   function stopPairPoll() {
     if (pairPollRef.current) { window.clearInterval(pairPollRef.current); pairPollRef.current = null; }
   }
-  // Hosted: mint a real pairing code and poll until a local agent claims it.
+  // The launcher owns device authorization. The browser only watches the
+  // signed-in account for an approved computer, so no durable token or
+  // bootstrap secret is exposed to the chat page.
   function startHostedPairing() {
     stopPairPoll();
-    fetch("/api/agent/code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account: account?.email ?? null }) })
-      .then((r) => r.json()).then(({ code }) => {
-        if (!code) return;
-        setPairCode(code);
-        setAgentPaired(false);
-        pairPollRef.current = window.setInterval(() => {
-          fetch(`/api/agent/status?code=${code}`, { cache: "no-store" }).then((r) => r.json()).then((s) => {
-            if (s?.status === "paired") {
-              setAgentPaired(true);
-              setAgentInfo(s.agent);
-              stopPairPoll();
-              try { localStorage.setItem("hyzr.chat.agentCode", code); } catch {}
-              setToast("Environment paired");
-            } else if (s?.status === "expired") {
-              stopPairPoll();
-            }
-          }).catch(() => {});
-        }, 2000);
+    setPairCode("");
+    setAgentPaired(false);
+    pairPollRef.current = window.setInterval(() => {
+      fetch("/api/setup", { cache: "no-store" }).then((r) => r.json()).then((setup) => {
+        if (!setup?.agentConnected) return;
+        setAgentPaired(true);
+        setAgentInfo(setup.agent);
+        setPairInfo(setup);
+        stopPairPoll();
+        setToast("Computer connected");
       }).catch(() => {});
+    }, 2000);
   }
   // Open the setup sheet. Local: detect the toolchain here. Hosted: mint a
   // code and wait for the downloadable agent to connect.
@@ -2804,13 +2799,12 @@ export default function Home() {
                     {downloadPlatform !== "mac" && <a href="/api/agent/download?platform=mac">macOS</a>}
                     {downloadPlatform !== "linux" && <a href="/api/agent/download?platform=linux">Linux</a>}
                   </div>
-                  <div className="pair-code">
-                    <span>Open it, then enter this code</span>
+                  <div className="pair-offline">
+                    <span><IconTerminal size={17} /></span>
                     <div>
-                      <code>{pairCode || "······"}</code>
-                      <button onClick={() => { navigator.clipboard?.writeText(pairCode); setToast("Code copied"); }}>Copy</button>
+                      <strong>Open the tiny launcher</strong>
+                      <p>It creates <code>~/Hyzr</code>, shows a secure one-time code, and opens the approval page automatically.</p>
                     </div>
-                    <small>Hyzr creates <code>~/Hyzr</code> for your projects. Keep the terminal open.</small>
                   </div>
                 </div>
               )}
@@ -2822,7 +2816,7 @@ export default function Home() {
               {!agentPaired && !knownComputer && (
                 <div className="pair-trust">
                   <IconShield size={13} />
-                  <span>Only enter this code on your own computer. Hyzr uses your local developer tools and files.</span>
+                  <span>Approve only the code shown in your terminal. Your developer credentials never leave your computer.</span>
                 </div>
               )}
             </>) : (<>

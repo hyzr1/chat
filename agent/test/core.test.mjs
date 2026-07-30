@@ -180,3 +180,21 @@ test("Windows command arguments cannot break out of their quoted launcher", () =
   assert.equal(__test.cmdQuote("100% ready"), '"100%% ready"');
   assert.equal(__test.cmdQuote("line\r\nbreak"), '"line  break"');
 });
+
+test("single-instance locking replaces stale locks and rejects a live duplicate", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hyzr-runtime-lock-"));
+  const lock = path.join(root, "runtime.lock");
+  try {
+    await writeFile(lock, JSON.stringify({ pid: 999_999_999, nonce: "stale" }));
+    const release = await __test.acquireRuntimeLock(lock);
+    await assert.rejects(
+      () => __test.acquireRuntimeLock(lock),
+      (error) => error?.code === "ALREADY_RUNNING",
+    );
+    await release();
+    const releaseAgain = await __test.acquireRuntimeLock(lock);
+    await releaseAgain();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

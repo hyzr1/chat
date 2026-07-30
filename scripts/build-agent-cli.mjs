@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmod, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +16,17 @@ runAgentCli().catch((error) => {
 `;
 
 await mkdir(downloads, { recursive: true });
-await writeFile(path.join(downloads, "hyzr-agent.mjs"), `${core.trimEnd()}${launcher}`, "utf8");
+const runtime = `${core.trimEnd()}${launcher}`;
+const runtimeHash = createHash("sha256").update(runtime).digest("hex");
+const version = core.match(/const VERSION = "([^"]+)"/)?.[1] || "unknown";
+await writeFile(path.join(downloads, "hyzr-agent.mjs"), runtime, "utf8");
+await writeFile(path.join(downloads, "hyzr-agent.sha256"), `${runtimeHash}  hyzr-agent.mjs\n`, "utf8");
+await writeFile(path.join(downloads, "hyzr-agent.json"), JSON.stringify({
+  version,
+  sha256: runtimeHash,
+  minimumNode: 18,
+  publishedAt: new Date().toISOString(),
+}, null, 2), "utf8");
 await copyFile(path.join(root, "agent", "bin", "hyzr.cmd"), path.join(downloads, "hyzr.cmd"));
 await copyFile(path.join(root, "agent", "bin", "hyzr"), path.join(downloads, "hyzr"));
 await chmod(path.join(downloads, "hyzr"), 0o755);

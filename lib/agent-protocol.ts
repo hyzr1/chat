@@ -1,4 +1,4 @@
-export const AGENT_PROTOCOL_VERSION = 2;
+export const AGENT_PROTOCOL_VERSION = 3;
 // A dedicated launcher heartbeat normally arrives every five seconds. Keep a
 // wider compatibility window for older launchers that only refresh presence
 // when polling or streaming a result.
