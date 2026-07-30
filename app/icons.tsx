@@ -292,6 +292,20 @@ export const IconGrid = (p: P) => (
   </Svg>
 );
 
+export const IconHome = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 10.5 12 4l8 6.5" />
+    <path d="M5.5 9.5V19a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.5" />
+  </Svg>
+);
+
+// Windows flag — filled quadrants, so it renders with fill not stroke.
+export const IconWindows = ({ size = 18, className }: P) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M3 5.4 10.5 4.3v7.2H3V5.4Zm0 13.2 7.5 1.1v-7.1H3v6ZM11.5 4.15 21 2.8v8.7h-9.5V4.15Zm0 15.7L21 21.2v-8.6h-9.5v7.25Z" />
+  </svg>
+);
+
 export const IconPuzzle = (p: P) => (
   <Svg {...p}>
     <path d="M10 4a2 2 0 0 1 4 0v1h3a1 1 0 0 1 1 1v3h1a2 2 0 0 1 0 4h-1v3a1 1 0 0 1-1 1h-3v-1a2 2 0 0 0-4 0v1H6a1 1 0 0 1-1-1v-3H4a2 2 0 0 1 0-4h1V6a1 1 0 0 1 1-1h4z" />

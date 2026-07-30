@@ -49,6 +49,8 @@ import {
   IconAttach,
   IconMic,
   IconTerminal,
+  IconHome,
+  IconWindows,
   IconPackage,
   IconEye,
   IconExternal,
@@ -1043,6 +1045,13 @@ export default function Home() {
     if (signedIn) { action(); return; }
     setShowLogin(true);
   }
+  // Placeholder for the pairing flow — the real Windows agent download and
+  // device pairing land in a later phase. For now, take signed-in users to
+  // Agent so the pairing surface is one step away.
+  function openPair() {
+    switchWorkMode("code");
+    setToast("Windows pairer — coming soon");
+  }
   function signIn(provider: string, email?: string) {
     const nextEmail = email?.trim() || `${provider.toLowerCase()}@hyzr.ai`;
     const next = { name: nextEmail.split("@")[0] || "You", email: nextEmail };
@@ -1913,8 +1922,7 @@ export default function Home() {
       <aside className={`sidebar ${collapsed ? "collapsed" : ""}`} aria-hidden={collapsed && isMobileViewport()}>
         <div className="side-top">
           <div className="brand">
-            <div className="logo"><HyzrMark size={22} /></div>
-            <span className="word"><b>Hyzr</b></span>
+            <div className="logo"><HyzrMark size={24} /></div>
           </div>
           <button className="side-icon" onClick={() => setCollapsed(true)} title="Collapse">
             <IconPanelLeft size={17} />
@@ -1922,7 +1930,7 @@ export default function Home() {
         </div>
         <div className="workmode-toggle" role="tablist" aria-label="Mode">
           <button role="tab" aria-selected={workMode === "chat"} className={workMode === "chat" ? "on" : ""} onClick={() => switchWorkMode("chat")}>
-            <IconSearch size={15} /> Chat
+            <IconHome size={15} /> Home
           </button>
           <button role="tab" aria-selected={workMode === "code"} className={workMode === "code" ? "on" : ""} onClick={() => switchWorkMode("code")}>
             <IconTerminal size={15} /> Agent
@@ -2041,7 +2049,7 @@ export default function Home() {
             </button>
           ) : (
             <button className="side-signin" onClick={() => setShowLogin(true)}>
-              <IconSparkles size={15} /><span>Sign in</span>
+              Log in or sign up
             </button>
           )}
         </div>
@@ -2089,6 +2097,14 @@ export default function Home() {
             <button className={mode === "local" ? "on" : ""} onClick={() => switchMode("local")} title="Use local subscriptions">Local</button>
             <button className={mode === "byok" ? "on" : ""} onClick={() => switchMode("byok")} title="Use API keys">API</button>
           </div>}
+          <div className="top-links">
+            <a className="top-link" href="https://code.hyzr.ai" target="_blank" rel="noopener" title="Learn to code — Hyzr Code">
+              Code <IconExternal size={12} />
+            </a>
+            <button className="top-download" onClick={() => requireAuth(() => openPair())} title="Download the pairer for Windows">
+              <IconWindows size={14} /> Download
+            </button>
+          </div>
           {signedIn
             ? <button className="top-icon" onClick={() => setShowSettings(true)} title="Settings"><IconSliders size={15} /></button>
             : <button className="top-signin" onClick={() => setShowLogin(true)}>Sign in</button>}
@@ -2152,6 +2168,16 @@ export default function Home() {
                 </button>
               ))}
             </div>}
+            {workMode === "code" && (
+              <div className="pair-cta">
+                <IconWindows size={20} />
+                <span className="pair-cta-text">
+                  <b>Pair your machine</b>
+                  <span>Build from your phone; runs in an isolated workspace on your PC.</span>
+                </span>
+                <button className="pair-cta-btn" onClick={openPair}><IconWindows size={13} /> Download</button>
+              </div>
+            )}
           </div>
         ) : (
           <>
