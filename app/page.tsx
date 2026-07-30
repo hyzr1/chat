@@ -605,6 +605,9 @@ export default function Home() {
   const [pairLoading, setPairLoading] = useState(false);
   const [agentPaired, setAgentPaired] = useState(false);
   const [pairCode, setPairCode] = useState("");
+  const [hosted, setHosted] = useState(false);
+  const [agentInfo, setAgentInfo] = useState<{ host: string; engine: string; claude: boolean; codex: boolean; git: boolean; node: string } | null>(null);
+  const pairPollRef = useRef<number | null>(null);
   type Tool = { available: boolean; version: string | null };
   const [pairInfo, setPairInfo] = useState<{ hosted?: boolean; platform: string; host?: string; node?: Tool; git?: Tool; claude?: Tool; codex?: Tool; workspace?: { path: string; exists: boolean; projects: number }; ready: boolean } | null>(null);
   const signedIn = account !== null;
@@ -937,6 +940,29 @@ export default function Home() {
     document.documentElement.dataset.workmode = workMode;
   }, [workMode]);
 
+  useEffect(() => { if (!showPair) stopPairPoll(); return () => stopPairPoll(); }, [showPair]);
+
+  // Detect hosted mode and restore a previously paired agent (verify it's
+  // still alive before trusting the saved code).
+  useEffect(() => {
+    let live = true;
+    fetch("/api/setup", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((info) => {
+      if (live && info) setHosted(Boolean(info.hosted));
+    }).catch(() => {});
+    let saved = "";
+    try { saved = localStorage.getItem("hyzr.chat.agentCode") || ""; } catch {}
+    if (saved) {
+      fetch(`/api/agent/status?code=${encodeURIComponent(saved)}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((s) => {
+          if (!live) return;
+          if (s?.status === "paired") { setPairCode(saved); setAgentPaired(true); setAgentInfo(s.agent); }
+          else { try { localStorage.removeItem("hyzr.chat.agentCode"); } catch {} }
+        }).catch(() => {});
+    }
+    return () => { live = false; };
+  }, []);
+
   // Agent is a signed-in feature; a guest (or a sign-out) can never sit in it.
   useEffect(() => {
     if (!signedIn && workMode === "code") { setWorkMode("chat"); setPlanOn(false); }
@@ -1064,16 +1090,45 @@ export default function Home() {
     if (signedIn) { action(); return; }
     setShowLogin(true);
   }
-  // Open the environment setup sheet and detect the local toolchain (Claude,
-  // Codex, Git, Node, workspace) so a user can connect their own machine and
-  // run Agent against their local CLIs instead of API keys or the free model.
+  function stopPairPoll() {
+    if (pairPollRef.current) { window.clearInterval(pairPollRef.current); pairPollRef.current = null; }
+  }
+  // Hosted: mint a real pairing code and poll until a local agent claims it.
+  function startHostedPairing() {
+    stopPairPoll();
+    fetch("/api/agent/code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account: account?.email ?? null }) })
+      .then((r) => r.json()).then(({ code }) => {
+        if (!code) return;
+        setPairCode(code);
+        setAgentPaired(false);
+        pairPollRef.current = window.setInterval(() => {
+          fetch(`/api/agent/status?code=${code}`, { cache: "no-store" }).then((r) => r.json()).then((s) => {
+            if (s?.status === "paired") {
+              setAgentPaired(true);
+              setAgentInfo(s.agent);
+              stopPairPoll();
+              try { localStorage.setItem("hyzr.chat.agentCode", code); } catch {}
+              setToast("Environment paired");
+            } else if (s?.status === "expired") {
+              stopPairPoll();
+            }
+          }).catch(() => {});
+        }, 2000);
+      }).catch(() => {});
+  }
+  // Open the setup sheet. Local: detect the toolchain here. Hosted: mint a
+  // code and wait for the downloadable agent to connect.
   function openPair() {
     setShowPair(true);
     setPairLoading(true);
-    if (!pairCode) setPairCode(uid().replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase());
     fetch("/api/setup", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((info) => info && setPairInfo(info))
+      .then((info) => {
+        if (!info) return;
+        setPairInfo(info);
+        setHosted(Boolean(info.hosted));
+        if (info.hosted && !agentPaired) startHostedPairing();
+      })
       .catch(() => {})
       .finally(() => setPairLoading(false));
   }
@@ -1316,6 +1371,61 @@ export default function Home() {
 
     const ac = new AbortController();
     abortRef.current = ac;
+
+    // Hosted Agent runs on the user's paired machine, not this server. Route
+    // the task through the relay and stream the agent's output back.
+    if (hosted && workMode === "code") {
+      const applyRelay = (content: string, streaming: boolean) => setMessages((prev) => {
+        const copy = [...prev];
+        for (let i = copy.length - 1; i >= 0; i--) {
+          if (copy[i].role === "assistant" && copy[i].runId === activeRunId) {
+            copy[i] = { ...copy[i], content, streaming, status: streaming ? "Running on your machine" : undefined, completedAt: streaming ? undefined : Date.now() };
+            break;
+          }
+        }
+        return copy;
+      });
+      if (!pairCode || !agentPaired) {
+        applyRelay("Pair your machine to run Agent tasks — open **Download → Pair your environment** and connect Claude or Codex.", false);
+        setBusy(false); busyRef.current = false; openPair();
+        return;
+      }
+      try {
+        const enq = await fetch("/api/agent/enqueue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: pairCode, job: { id: activeRunId, prompt: text, model: override !== "auto" ? override : null } }), signal: ac.signal });
+        const enqJson = await enq.json().catch(() => ({}));
+        if (!enq.ok) {
+          applyRelay(enqJson.error || "Could not reach your paired agent.", false);
+          if (enqJson.reason === "offline" || enqJson.reason === "unpaired") { setAgentPaired(false); try { localStorage.removeItem("hyzr.chat.agentCode"); } catch {} }
+          setBusy(false); busyRef.current = false;
+          return;
+        }
+        let cursor = 0;
+        let ans = "";
+        const started = Date.now();
+        while (!ac.signal.aborted) {
+          const ev = await fetch(`/api/agent/events?job=${activeRunId}&cursor=${cursor}`, { cache: "no-store", signal: ac.signal }).then((r) => r.json()).catch(() => null);
+          if (ev) {
+            cursor = ev.cursor ?? cursor;
+            let done = false;
+            for (const e of (ev.events || [])) {
+              if (e.type === "text" && e.text) { ans += e.text; applyRelay(ans, true); }
+              else if (e.type === "done") { done = true; }
+              else if (e.type === "error") { ans += (ans ? "\n\n" : "") + (e.text || "The agent reported an error."); done = true; }
+            }
+            if (done) break;
+          }
+          if (Date.now() - started > 10 * 60 * 1000) { ans += "\n\n_(Timed out waiting for the agent.)_"; break; }
+          await new Promise((r) => setTimeout(r, 600));
+        }
+        applyRelay(ans || "The agent returned no output.", false);
+      } catch (e: any) {
+        if (e?.name !== "AbortError") applyRelay("Lost connection to your paired agent.", false);
+      } finally {
+        setBusy(false); busyRef.current = false;
+      }
+      return;
+    }
+
     let answer = "";
     let detached = false;
     try {
@@ -2370,15 +2480,25 @@ export default function Home() {
             </div>
 
             {p?.hosted ? (<>
-              <div className="pair-status pending">
+              <div className={`pair-status ${agentPaired ? "ready" : "pending"}`}>
                 <span className="ps-dot" />
-                {agentPaired ? "Your machine is paired — Agent runs locally." : "Download the Hyzr agent to connect this browser to your machine."}
+                {agentPaired
+                  ? `Connected — Agent runs on your ${agentInfo?.engine === "codex" ? "Codex" : agentInfo?.engine === "claude" ? "Claude" : "machine"}${agentInfo?.host ? ` (${agentInfo.host})` : ""}.`
+                  : "Waiting for your machine — run the agent with the code below."}
               </div>
+              {agentPaired ? (
+                <div className="pair-tools">
+                  {row(<IconSparkles size={16} />, "Claude", agentInfo ? { available: agentInfo.claude, version: agentInfo.engine === "claude" ? "In use" : null } : null, <>Not connected on this machine.</>)}
+                  {row(<IconCpu size={16} />, "Codex", agentInfo ? { available: agentInfo.codex, version: agentInfo.engine === "codex" ? "In use" : null } : null, <>Not connected on this machine.</>)}
+                  {row(<IconGithub size={16} />, "Git", agentInfo ? { available: agentInfo.git, version: null } : null, <>Not detected.</>)}
+                </div>
+              ) : (
               <div className="pair-steps">
                 <div className="pair-step"><span className="pair-step-n">1</span><div>
                   <b>Download the Hyzr agent</b>
                   <span>A tiny app for your computer. It detects your Claude &amp; Codex and runs projects locally.</span>
                   <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, textDecoration: "none" }} href="https://github.com/hyzr1/chat/releases" target="_blank" rel="noopener"><IconWindows size={13} /> Download for Windows</a>
+                  <span className="pair-hint" style={{ display: "block", marginTop: 6 }}>Or run: <code>npx @hyzr/agent --code={pairCode || "······"}</code></span>
                 </div></div>
                 <div className="pair-step"><span className="pair-step-n">2</span><div>
                   <b>Enter your pairing code</b>
@@ -2390,12 +2510,15 @@ export default function Home() {
                   <span>This site sends Agent tasks to your machine; they run on your Claude/Codex and save to your isolated workspaces.</span>
                 </div></div>
               </div>
+              )}
               <div className="pair-perms">
                 <IconShield size={14} />
                 <span>The agent runs on your computer. Hyzr never receives your files or keys — only the task and its result.</span>
               </div>
               <div className="pair-actions">
-                <button className="pair-primary" onClick={() => setShowPair(false)}>Done</button>
+                {agentPaired
+                  ? <button className="pair-primary" onClick={() => { setShowPair(false); switchWorkMode("code"); }}>Open Agent</button>
+                  : <button className="pair-primary" onClick={() => setShowPair(false)}>Done</button>}
                 <span className="pair-secondary">No machine? Use the free chat or add API keys instead.</span>
               </div>
             </>) : (<>

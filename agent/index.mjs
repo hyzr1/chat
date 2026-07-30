@@ -77,9 +77,15 @@ async function main() {
     git: await detect("git"),
     node: process.version,
   };
-  const engine = agent.claude ? "claude" : agent.codex ? "codex" : null;
+  // Adapt to whatever the machine has: prefer an explicit --engine, else
+  // Claude, else Codex. Works fine if only one is installed.
+  const wanted = (arg("engine") || process.env.HYZR_ENGINE || "").toLowerCase();
+  const engine = (wanted === "claude" && agent.claude) ? "claude"
+    : (wanted === "codex" && agent.codex) ? "codex"
+    : agent.claude ? "claude" : agent.codex ? "codex" : null;
   if (!engine) { log("No Claude or Codex CLI found on PATH. Install one, sign in, and re-run."); process.exit(1); }
-  log(`detected: claude=${agent.claude} codex=${agent.codex} git=${agent.git} node=${agent.node}`);
+  agent.engine = engine;
+  log(`detected: claude=${agent.claude} codex=${agent.codex} git=${agent.git} node=${agent.node} → using ${engine}`);
 
   const code = (arg("code") || process.env.HYZR_CODE || await ask("Enter the pairing code from the Hyzr app: ")).toUpperCase();
   const paired = await post("/api/agent/pair", { code, agent });

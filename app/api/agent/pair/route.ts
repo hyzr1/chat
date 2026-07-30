@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
     codex: Boolean(agent?.codex),
     git: Boolean(agent?.git),
     node: String(agent?.node || ""),
+    engine: ["claude", "codex"].includes(String(agent?.engine)) ? String(agent?.engine) : (agent?.claude ? "claude" : agent?.codex ? "codex" : ""),
   };
   await kvSet(`agent:${token}`, { token, agent: cleanAgent, pairedAt: Date.now(), lastSeen: Date.now() }, 60 * 60 * 24 * 30);
   await kvSet(`token:${String(code).toUpperCase()}`, token, 60 * 60 * 24 * 30);
