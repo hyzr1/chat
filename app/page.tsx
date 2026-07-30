@@ -2455,6 +2455,8 @@ export default function Home() {
       {showPair && (() => {
         const p = pairInfo;
         const connected = Boolean(p && !p.hosted && (p.claude?.available || p.codex?.available));
+        const origin = typeof window !== "undefined" ? window.location.origin : "";
+        const runCmd = `node hyzr-agent.mjs --url=${origin} --code=${pairCode || "······"}`;
         const row = (icon: React.ReactNode, label: string, tool: { available: boolean; version: string | null } | null, help: React.ReactNode) => (
           <div className={`pair-tool ${tool?.available ? "on" : "off"}`}>
             <span className="pt-icon">{icon}</span>
@@ -2495,19 +2497,21 @@ export default function Home() {
               ) : (
               <div className="pair-steps">
                 <div className="pair-step"><span className="pair-step-n">1</span><div>
-                  <b>Download the Hyzr agent</b>
-                  <span>A tiny app for your computer. It detects your Claude &amp; Codex and runs projects locally.</span>
-                  <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, textDecoration: "none" }} href="https://github.com/hyzr1/chat/releases" target="_blank" rel="noopener"><IconWindows size={13} /> Download for Windows</a>
-                  <span className="pair-hint" style={{ display: "block", marginTop: 6 }}>Or run: <code>npx @hyzr/agent --code={pairCode || "······"}</code></span>
+                  <b>Download the agent</b>
+                  <span>One file. It detects your Claude &amp; Codex and runs tasks on your machine. Needs <a href="https://nodejs.org" target="_blank" rel="noopener">Node</a>.</span>
+                  <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, textDecoration: "none" }} href="/hyzr-agent.mjs" download="hyzr-agent.mjs"><IconWindows size={13} /> Download hyzr-agent.mjs</a>
                 </div></div>
                 <div className="pair-step"><span className="pair-step-n">2</span><div>
-                  <b>Enter your pairing code</b>
-                  <span>Open the agent and paste this code to link it to your account:</span>
-                  <div className="pair-code" style={{ marginTop: 8 }}>{(pairCode || "······").split("").map((c, i) => <b key={i}>{c}</b>)}</div>
+                  <b>Run it with your code</b>
+                  <span>In a terminal, from where it downloaded:</span>
+                  <div className="pair-field" style={{ marginTop: 8 }}>
+                    <code>{runCmd}</code>
+                    <button onClick={() => { navigator.clipboard?.writeText(runCmd); setToast("Command copied"); }}>Copy</button>
+                  </div>
                 </div></div>
                 <div className="pair-step"><span className="pair-step-n">3</span><div>
                   <b>Build from anywhere</b>
-                  <span>This site sends Agent tasks to your machine; they run on your Claude/Codex and save to your isolated workspaces.</span>
+                  <span>This site sends Agent tasks to your machine; they run on your Claude/Codex in isolated workspaces and stream back here.</span>
                 </div></div>
               </div>
               )}

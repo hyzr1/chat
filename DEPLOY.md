@@ -32,25 +32,24 @@ Optional: set `HYZR_CHAT_ACCESS_TOKEN` only for a private/self-hosted instance.
 ## 2. How a user connects their environment
 
 On the hosted site, a signed-in user opens **Download → Pair your environment**
-and gets a 6-character code. On their PC they:
+and gets a 6-character code. They then, on their own machine:
 
-1. Run the Hyzr app locally (this is the full pipeline — planning + capability
-   routing across **both** Claude and Codex + isolated workspaces):
+1. **Download one file** — `hyzr-agent.mjs`, served from the site itself
+   (`/hyzr-agent.mjs`). Only Node is required.
+2. **Run it with the code** (the site shows the exact command):
    ```bash
-   npm install && npm run dev      # serves http://localhost:3000
-   ```
-2. Run the agent bridge, which connects that local pipeline to the hosted site:
-   ```bash
-   node agent/index.mjs --url=https://chat.hyzr.ai --code=ABC123 --app=http://localhost:3000
+   node hyzr-agent.mjs --url=https://chat.hyzr.ai --code=ABC123
    ```
 
-The bridge pairs, then for each task the hosted site sends, it runs it through
-the **local** `/api/chat` — so every task is decomposed and routed across the
-user's own Claude and Codex (no single-model preference), executing in isolated
-workspaces on their machine, streaming results back.
+The agent is self-contained: it detects the user's Claude and Codex, pairs, then
+runs each task the site sends on the best-fit CLI in an isolated per-task
+workspace, streaming output back. No separate app, no other install — identical
+on every machine.
 
-> Roadmap: fold the bridge into the app so it's a single download that
-> auto-connects when paired (one process instead of two).
+> Routing note: the agent routes each task to Claude or Codex (using both across
+> the workload). Full intra-task multi-model planning (the app's planner
+> splitting one task across models at once) is a future upgrade that bundles the
+> execution engine into the agent.
 
 ## 3. What still uses which path
 
