@@ -2,7 +2,13 @@ import { existsSync } from "fs";
 import os from "os";
 import path from "path";
 
-const home = os.homedir();
+// On Vercel (and any serverless host) the home directory is read-only and only
+// /tmp is writable — and ephemeral. The durable SQLite store is a local-first
+// feature that has no role in a hosted deploy (hosted execution runs on paired
+// user machines), so we point it at a scratch dir there just to avoid crashing
+// the session/task routes. Real hosted persistence lives in Upstash.
+const hosted = process.env.VERCEL === "1" || process.env.HYZR_HOSTED === "1";
+const home = hosted ? path.join(os.tmpdir(), "hyzr-home") : os.homedir();
 export const HYZR_CHAT_STATE_DIRECTORY = path.join(/*turbopackIgnore: true*/ home, ".hyzr", "chat");
 export const LEGACY_STATE_DIRECTORY = path.join(/*turbopackIgnore: true*/ home, ".vmx");
 export const HYZR_CHAT_WORKSPACE_ROOT = path.join(/*turbopackIgnore: true*/ home, "hyzr-chat-workspaces");
