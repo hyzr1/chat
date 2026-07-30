@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.vercel
+.artifacts
+test-results
+playwright-report
+docs
+tests
+prod-*
+agent/node_modules
+agent/dist
+agent/desktop
+agent/test
+*.log
+*.tsbuildinfo
