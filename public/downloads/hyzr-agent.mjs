@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 3;
-const VERSION = "1.2.1";
+const VERSION = "1.2.2";
 const IS_WIN = process.platform === "win32";
 const DEFAULT_ROOT = path.join(os.homedir(), "Hyzr");
 const STATE_ROOT = path.join(os.homedir(), ".hyzr", "agent");
@@ -294,6 +294,76 @@ function openExternalUrl(url) {
         : spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
     child.unref();
     return true;
+  } catch {
+    return false;
+  }
+}
+
+function setModernConsoleFont() {
+  if (!IS_WIN) return false;
+  const script = String.raw`
+$definition = @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class HyzrConsole {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct COORD {
+    public short X;
+    public short Y;
+  }
+
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct CONSOLE_FONT_INFOEX {
+    public uint cbSize;
+    public uint nFont;
+    public COORD dwFontSize;
+    public int FontFamily;
+    public int FontWeight;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string FaceName;
+  }
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern IntPtr GetStdHandle(int handle);
+
+  [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+  private static extern bool SetCurrentConsoleFontEx(
+    IntPtr output,
+    bool maximumWindow,
+    ref CONSOLE_FONT_INFOEX info
+  );
+
+  public static bool Apply(string face, short height) {
+    var info = new CONSOLE_FONT_INFOEX();
+    info.cbSize = (uint)Marshal.SizeOf(typeof(CONSOLE_FONT_INFOEX));
+    info.dwFontSize = new COORD { X = 0, Y = height };
+    info.FontFamily = 54;
+    info.FontWeight = 400;
+    info.FaceName = face;
+    return SetCurrentConsoleFontEx(GetStdHandle(-11), false, ref info);
+  }
+}
+'@
+
+try {
+  Add-Type -TypeDefinition $definition -ErrorAction Stop
+  if (-not [HyzrConsole]::Apply('Cascadia Mono', 18)) {
+    [void][HyzrConsole]::Apply('Consolas', 18)
+  }
+} catch {
+  try { [void][HyzrConsole]::Apply('Consolas', 18) } catch {}
+}
+`;
+  try {
+    const result = spawnSync("powershell.exe", [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy", "Bypass",
+      "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64"),
+    ], { windowsHide: false, stdio: ["inherit", "inherit", "ignore"] });
+    return result.status === 0;
   } catch {
     return false;
   }
@@ -1122,6 +1192,7 @@ export async function runAgentCli() {
     throw error;
   }
 
+  setModernConsoleFont();
   const saved = await readAgentConfig();
   const relay = args.url || process.env.HYZR_URL || saved.relay || "https://chat.hyzr.ai";
   let legacyCode = String(args.code || process.env.HYZR_CODE || "").replace(/\s/g, "").toUpperCase();
@@ -1151,6 +1222,11 @@ export async function runAgentCli() {
   console.log(`  ${muted("Tools")}      ${toolNames.join(" · ") || "No coding provider found"}`);
   console.log(`  ${muted("Access")}     ${permissionMode === "full-access" ? "Full local access" : "Project workspace only"}`);
   console.log("");
+
+  // Opening the paired web workspace is part of the launch experience. A
+  // computer without a token opens the one-time approval page in
+  // deviceAuthorize; an already-paired computer opens Hyzr directly.
+  if (saved.token && args.browser !== "false") openExternalUrl(cleanRelay(relay));
 
   if ("doctor" in args) {
     console.log(`  ${green("●")} Runtime is healthy`);
@@ -1275,7 +1351,7 @@ export async function loadAgentConfig() {
   return readAgentConfig();
 }
 
-export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, transcript, previewEntry, previewPortFor, previewPortFromPrompt, previewHostArgs, previewListenerPidsFromNetstat, privateLanAddress, startPreviewServer, sweepPreviewServers, streamSeparator, specialistPlan, processIsAlive, acquireRuntimeLock, deviceAuthorize };
+export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, transcript, previewEntry, previewPortFor, previewPortFromPrompt, previewHostArgs, previewListenerPidsFromNetstat, privateLanAddress, startPreviewServer, sweepPreviewServers, streamSeparator, specialistPlan, processIsAlive, acquireRuntimeLock, deviceAuthorize, setModernConsoleFont };
 
 runAgentCli().catch((error) => {
   console.error("\n  Hyzr stopped —", error instanceof Error ? error.message : error);

@@ -184,6 +184,10 @@ test("Windows command arguments cannot break out of their quoted launcher", () =
   assert.equal(__test.cmdQuote("line\r\nbreak"), '"line  break"');
 });
 
+test("Windows console font helper loads successfully", { skip: process.platform !== "win32" }, () => {
+  assert.equal(__test.setModernConsoleFont(), true);
+});
+
 test("single-instance locking replaces stale locks and rejects a live duplicate", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hyzr-runtime-lock-"));
   const lock = path.join(root, "runtime.lock");
