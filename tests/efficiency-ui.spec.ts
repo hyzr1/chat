@@ -205,7 +205,10 @@ test("Preview starts a project dev server even before an HTML build exists", asy
   await page.route("**/api/agent/events**", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify({ events: [{ type: "done" }], cursor: 1 }),
+    body: JSON.stringify({
+      events: [{ type: "text", text: modelJobs > 1 ? "Started the dev server." : "Created the project." }, { type: "done" }],
+      cursor: 2,
+    }),
   }));
   await page.route("**/api/followups", (route) => route.fulfill({
     status: 200,
@@ -250,10 +253,72 @@ test("Preview starts a project dev server even before an HTML build exists", asy
   await page.locator(".preview-actions").getByRole("button", { name: "Close" }).click();
   await page.locator("textarea").fill("can you put it on a dev server");
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText(/local dev server is running at/i)).toBeVisible();
+  await expect(page.getByText("Started the dev server.")).toBeVisible();
   await expect(page.locator("iframe.preview-frame")).toBeVisible();
-  expect(modelJobs).toBe(1);
+  expect(modelJobs).toBe(2);
   expect(page.context().pages()).toHaveLength(pageCount);
+});
+
+test("a compound build and dev-server prompt reaches the coding agent", async ({ page }) => {
+  await createTestAccount(page);
+  const agent = {
+    host: "Build PC",
+    platform: "win32",
+    version: "1.1.3",
+    node: "v24",
+    claude: true,
+    codex: true,
+    git: true,
+    gh: true,
+    engine: "claude+codex",
+    workspaceRoot: "C:\\Users\\developer\\Hyzr",
+  };
+  await page.route("**/api/setup", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ hosted: true, agentConnected: true, ready: true, agent }),
+  }));
+  let submittedPrompt = "";
+  const actions: string[] = [];
+  await page.route("**/api/agent/enqueue", async (route) => {
+    actions.push("enqueue");
+    submittedPrompt = (await route.request().postDataJSON()).job.prompt;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, jobId: "compound-build-run" }),
+    });
+  });
+  await page.route("**/api/agent/events**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      events: [{ type: "text", text: "Created the Hello World project and started its dev server." }, { type: "done" }],
+      cursor: 2,
+    }),
+  }));
+  await page.route("**/api/preview-server", (route) => {
+    actions.push("preview");
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "not ready" }),
+    });
+  });
+  await page.route("**/api/workspace**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ files: [], entry: null, count: 0 }),
+  }));
+  await page.goto("/");
+  await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
+  const prompt = "make a hello world and put it on a dev server";
+  await page.locator("textarea").fill(prompt);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Created the Hello World project and started its dev server.")).toBeVisible();
+  expect(submittedPrompt).toBe(prompt);
+  expect(actions[0]).toBe("enqueue");
+  await expect(page.getByText(/couldn't find a previewable app/i)).toHaveCount(0);
 });
 
 test("Agent send waits for presence and never leaves an offline request analyzing", async ({ page }) => {

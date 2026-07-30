@@ -80,7 +80,7 @@ type Theme = "dark" | "light" | "system";
 interface ProductPrefs { autoPreview: boolean; autoReview: boolean; adaptiveRouting: boolean; voiceInput: boolean; language: string; reducedMotion: boolean; compactChat: boolean; showUsage: boolean; sendWithEnter: boolean; newChatKey: "k" | "n"; saveHistory: boolean; }
 const DEFAULT_PRODUCT_PREFS: ProductPrefs = { autoPreview: true, autoReview: true, adaptiveRouting: true, voiceInput: true, language: "Auto detect", reducedMotion: false, compactChat: false, showUsage: true, sendWithEnter: true, newChatKey: "k", saveHistory: true };
 const isMobileViewport = () => typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches;
-const isManagedPreviewRequest = (value: string) =>
+const requestsDevServer = (value: string) =>
   /\b(?:start|run|launch|open|put|serve|host)\b[\s\S]{0,55}\b(?:dev|development|local|preview|http|web)?\s*server\b/i.test(value)
   || /\b(?:preview|serve)\s+(?:it|this|the\s+(?:site|app|project|page))\b/i.test(value);
 const LIBRARY_VIEWS: View[] = ["connectors", "skills", "workflows"];
@@ -1389,9 +1389,14 @@ export default function Home() {
     busyRef.current = true;
     setView("chat");
     const base = baseMessages ?? messages;
-    // Automatically reveal a project only for its initial build. Follow-up
-    // prompts refresh an already-open preview but never reopen a closed one.
-    autoPreviewRunRef.current = base.length === 0;
+    // Automatically reveal a project for its initial build. Ordinary
+    // follow-ups respect a manually closed preview; an explicit server request
+    // can reopen it after the CLI has completed the command.
+    // Claude/Codex always handles Agent prompts, including shell and dev-server
+    // commands. This flag only asks the UI to discover and display the server
+    // after the CLI finishes; it never replaces or intercepts the task.
+    const wantsDevServerPreview = workMode === "code" && requestsDevServer(text);
+    autoPreviewRunRef.current = base.length === 0 || wantsDevServerPreview;
 
     // Fold text attachments into the prompt; images go in the request body.
     const textFiles = attachments.filter((a) => a.kind === "text");
@@ -1436,6 +1441,7 @@ export default function Home() {
       setCurrentId(sid);
       window.history.pushState({}, "", `/chat/${sid}`);
     }
+    if (wantsDevServerPreview) previewDismissedRef.current.delete(sid);
 
     const activeRunId = uid();
     const history: Msg[] = [
@@ -1517,24 +1523,6 @@ export default function Home() {
           ? "Hyzr is offline. Reopen **hyzr.cmd** on your computer and leave the terminal open."
           : "Connect your computer first — download the tiny Hyzr terminal launcher and enter the code it asks for.", false);
         setBusy(false); busyRef.current = false; openPair();
-        return;
-      }
-      // A preview request is infrastructure, not a model task. Delegating it
-      // previously let a model spawn a disposable Python process and invent a
-      // Vercel hostname for a port that only existed on the user's computer.
-      if (isManagedPreviewRequest(text)) {
-        try {
-          previewDismissedRef.current.delete(sid);
-          const found = await checkPreview(sid, 0, true, true);
-          const url = previewUrlRef.current;
-          applyRelay(found && url
-            ? `Your local dev server is running at [${url}](${url}). I opened it in **Preview** beside this chat.`
-            : "I couldn't find a previewable app in this project yet. Create the project files first, then open Preview.", false);
-        } catch (error: any) {
-          applyRelay(error?.message || "The local project server could not start.", false);
-        } finally {
-          setBusy(false); busyRef.current = false;
-        }
         return;
       }
       try {
