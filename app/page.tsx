@@ -651,6 +651,7 @@ export default function Home() {
   const queueDispatchRef = useRef(false);
   const previewDismissedRef = useRef<Set<string>>(new Set());
   const previewUrlRef = useRef<string | null>(null);
+  const previewChecksRef = useRef<Map<string, Promise<boolean>>>(new Map());
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -1056,9 +1057,15 @@ export default function Home() {
   useEffect(() => {
     if (!busy || !currentId || !productPrefs.autoPreview || !autoPreviewRunRef.current || previewDismissedRef.current.has(currentId)) return;
     let found = false;
+    let inFlight = false;
     const poll = async () => {
-      if (found) return;
-      found = await checkPreview(currentId, 0);
+      if (found || inFlight) return;
+      inFlight = true;
+      try {
+        found = await checkPreview(currentId, 0);
+      } finally {
+        inFlight = false;
+      }
     };
     poll();
     const timer = window.setInterval(poll, 1200);
@@ -1959,7 +1966,11 @@ export default function Home() {
 
   // If the agent built a previewable app in the workspace, open it split-screen.
   async function checkPreview(sessionId = currentId, delay = 600, forceReload = false, reportFailure = false): Promise<boolean> {
-    try {
+    const key = sessionId || "new";
+    const existing = previewChecksRef.current.get(key);
+    if (existing) return existing;
+    const request = (async () => {
+      try {
       if (sessionId && previewDismissedRef.current.has(sessionId)) return false;
       if (delay) await new Promise((r) => setTimeout(r, delay));
       if (sessionId && previewDismissedRef.current.has(sessionId)) return false;
@@ -2015,10 +2026,17 @@ export default function Home() {
         setPreviewOpen(true);
         return true;
       }
-    } catch (error: any) {
-      if (reportFailure) setToast(error?.message || "Could not open this preview");
+      } catch (error: any) {
+        if (reportFailure) setToast(error?.message || "Could not open this preview");
+      }
+      return false;
+    })();
+    previewChecksRef.current.set(key, request);
+    try {
+      return await request;
+    } finally {
+      if (previewChecksRef.current.get(key) === request) previewChecksRef.current.delete(key);
     }
-    return false;
   }
   async function showPreview() {
     if (!currentId) {
@@ -2934,11 +2952,17 @@ function PreviewPane({
 
   useEffect(() => {
     let live = true;
-    const load = () =>
-      fetch(`/api/workspace?session=${encodeURIComponent(sessionId)}`, { cache: "no-store" })
-        .then((r) => r.json())
-        .then((data) => { if (live) setFiles(data.files ?? []); })
-        .catch(() => {});
+    let inFlight = false;
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const response = await fetch(`/api/workspace?session=${encodeURIComponent(sessionId)}`, { cache: "no-store" });
+        const data = await response.json();
+        if (live) setFiles(data.files ?? []);
+      } catch {}
+      finally { inFlight = false; }
+    };
     load();
     const timer = window.setInterval(load, 1200);
     return () => { live = false; window.clearInterval(timer); };

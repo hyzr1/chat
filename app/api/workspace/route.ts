@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
         req,
         requestedFile ? "workspace.read" : "workspace.list",
         requestedFile ? { workspaceId: session, path: requestedFile } : { workspaceId: session },
+        45_000,
       );
       return NextResponse.json(data, { headers: { "Cache-Control": "no-store" } });
     } catch (error: any) {
