@@ -57,6 +57,11 @@ test("paired relay preserves workspace identity and scopes results to the accoun
   expect((await agent.post("/api/agent/result", { data: { token, jobId, type: "text", text: "Created index.html" } })).ok()).toBeTruthy();
   expect((await agent.post("/api/agent/result", { data: { token, jobId, type: "done" } })).ok()).toBeTruthy();
 
+  const heartbeat = await agent.post("/api/agent/heartbeat", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(heartbeat.ok()).toBeTruthy();
+
   const events = await request.get(`/api/agent/events?job=${encodeURIComponent(jobId)}&cursor=0`);
   expect(events.ok()).toBeTruthy();
   expect((await events.json()).events.map((event: { type: string }) => event.type)).toEqual(["text", "done"]);
@@ -81,5 +86,23 @@ test("paired relay preserves workspace identity and scopes results to the accoun
   });
   expect(rejectedWhileOffline.status()).toBe(410);
   await expect(rejectedWhileOffline.json()).resolves.toMatchObject({ reason: "offline" });
+
+  // A real launcher heartbeat immediately restores truthful presence after a
+  // transient disconnect marker.
+  expect((await agent.post("/api/agent/heartbeat", {
+    headers: { Authorization: `Bearer ${token}` },
+  })).ok()).toBeTruthy();
+  const restored = await request.post("/api/agent/enqueue", {
+    data: {
+      job: {
+        id: `restored-${nonce}`,
+        conversationId,
+        workspaceId: conversationId,
+        prompt: "Continue",
+        history: [],
+      },
+    },
+  });
+  expect(restored.ok()).toBeTruthy();
   await agent.dispose();
 });

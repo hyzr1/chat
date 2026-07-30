@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 2;
-const VERSION = "1.1.2";
+const VERSION = "1.1.3";
 const IS_WIN = process.platform === "win32";
 const DEFAULT_ROOT = path.join(os.homedir(), "Hyzr");
 const STATE_ROOT = path.join(os.homedir(), ".hyzr", "agent");
@@ -201,9 +201,11 @@ function providerModel(engine, requested) {
 
 function transcript(job) {
   const history = Array.isArray(job.history) ? job.history.slice(-16) : [];
-  if (!history.length) return String(job.prompt);
+  const previewRule = "Hyzr manages local preview servers itself. Do not start a persistent/background HTTP or dev server, and never invent a public or Vercel URL for a local port. Create the project files and package scripts; Hyzr will start and display the local server.";
+  if (!history.length) return `${previewRule}\n\nUser: ${String(job.prompt)}`;
   return [
     "This is a resumed Hyzr web conversation. Preserve continuity within this workspace.",
+    previewRule,
     ...history.map((message) => `${message.role === "assistant" ? "Assistant" : "User"}: ${String(message.content || "").slice(0, 8000)}`),
     `User: ${String(job.prompt)}`,
   ].join("\n\n");
@@ -928,6 +930,26 @@ export async function startAgent(options = {}) {
   else await writeJson(CONFIG_FILE, persisted);
   options.onToken?.(token);
 
+  // Polling pauses while Claude/Codex is working. Presence must not: otherwise
+  // the website incorrectly declares the machine offline in the middle of a
+  // healthy long-running task.
+  let heartbeatBusy = false;
+  const heartbeat = async () => {
+    if (heartbeatBusy || options.signal?.aborted) return;
+    heartbeatBusy = true;
+    try {
+      await fetch(`${relay}/api/agent/heartbeat`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(8_000),
+      });
+    } catch {}
+    finally { heartbeatBusy = false; }
+  };
+  await heartbeat();
+  const heartbeatTimer = setInterval(heartbeat, 5_000);
+  heartbeatTimer.unref?.();
+
   let writeChain = Promise.resolve();
   const emit = (jobId, type, text = "", data) => {
     writeChain = writeChain
@@ -948,8 +970,9 @@ export async function startAgent(options = {}) {
   options.onStatus?.({ connected: true, capabilities });
 
   let failures = 0;
-  while (!options.signal?.aborted) {
-    try {
+  try {
+    while (!options.signal?.aborted) {
+      try {
       const response = await fetch(`${relay}/api/agent/poll`, {
         cache: "no-store",
         headers: { authorization: `Bearer ${token}` },
@@ -977,12 +1000,15 @@ export async function startAgent(options = {}) {
         await emit(job.id, "error", error instanceof Error ? error.message : String(error));
       }
       await writeChain;
-    } catch (error) {
-      if (/^Pairing expired\./.test(error instanceof Error ? error.message : String(error))) throw error;
-      failures += 1;
-      options.onStatus?.({ connected: false, error: error instanceof Error ? error.message : String(error) });
-      await sleep(Math.min(30_000, 1000 * 2 ** Math.min(failures, 5)) + Math.floor(Math.random() * 300));
+      } catch (error) {
+        if (/^Pairing expired\./.test(error instanceof Error ? error.message : String(error))) throw error;
+        failures += 1;
+        options.onStatus?.({ connected: false, error: error instanceof Error ? error.message : String(error) });
+        await sleep(Math.min(30_000, 1000 * 2 ** Math.min(failures, 5)) + Math.floor(Math.random() * 300));
+      }
     }
+  } finally {
+    clearInterval(heartbeatTimer);
   }
 }
 

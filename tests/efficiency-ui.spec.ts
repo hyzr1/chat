@@ -191,11 +191,15 @@ test("Preview starts a project dev server even before an HTML build exists", asy
     contentType: "application/json",
     body: JSON.stringify({ hosted: true, agentConnected: true, ready: true, agent }),
   }));
-  await page.route("**/api/agent/enqueue", (route) => route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({ ok: true, jobId: "preview-run" }),
-  }));
+  let modelJobs = 0;
+  await page.route("**/api/agent/enqueue", (route) => {
+    modelJobs += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, jobId: "preview-run" }),
+    });
+  });
   await page.route("**/api/agent/events**", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -240,6 +244,14 @@ test("Preview starts a project dev server even before an HTML build exists", asy
   await page.locator(".preview-actions").getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Preview" }).click();
   await expect(page.locator(".preview-path")).toHaveText("http://localhost:5173");
+  const pageCount = page.context().pages().length;
+  await page.locator(".preview-actions").getByRole("button", { name: "Close" }).click();
+  await page.locator("textarea").fill("can you put it on a dev server");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(/local dev server is running at/i)).toBeVisible();
+  await expect(page.locator("iframe.preview-frame")).toBeVisible();
+  expect(modelJobs).toBe(1);
+  expect(page.context().pages()).toHaveLength(pageCount);
 });
 
 test("Agent send waits for presence and never leaves an offline request analyzing", async ({ page }) => {
@@ -275,7 +287,7 @@ test("Agent send waits for presence and never leaves an offline request analyzin
   await expect(page.getByText(/Analyzing your request/i)).toHaveCount(0);
 });
 
-test("mobile preview opens the computer's Wi-Fi dev server directly", async ({ page }) => {
+test("mobile preview renders beside chat and targets the computer's Wi-Fi server", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await createTestAccount(page);
   const agent = {
@@ -324,8 +336,8 @@ test("mobile preview opens the computer's Wi-Fi dev server directly", async ({ p
   await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
   await page.locator("textarea").fill("Create a static portfolio");
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText("Preview on this Wi-Fi network")).toBeVisible();
-  await expect(page.getByRole("link", { name: /Open Wi-Fi preview/ })).toHaveAttribute("href", /^http:\/\/192\.168\.1\.44:43120\/?\?n=/);
+  await expect(page.locator("iframe.preview-frame")).toHaveAttribute("src", /^http:\/\/192\.168\.1\.44:43120\/?\?n=/);
+  await expect(page.locator(".preview-path")).toHaveText("http://192.168.1.44:43120");
 });
 
 test("evaluation lab runs free audits and gates paid comparisons", async ({ page }) => {

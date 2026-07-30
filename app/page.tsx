@@ -80,6 +80,9 @@ type Theme = "dark" | "light" | "system";
 interface ProductPrefs { autoPreview: boolean; autoReview: boolean; adaptiveRouting: boolean; voiceInput: boolean; language: string; reducedMotion: boolean; compactChat: boolean; showUsage: boolean; sendWithEnter: boolean; newChatKey: "k" | "n"; saveHistory: boolean; }
 const DEFAULT_PRODUCT_PREFS: ProductPrefs = { autoPreview: true, autoReview: true, adaptiveRouting: true, voiceInput: true, language: "Auto detect", reducedMotion: false, compactChat: false, showUsage: true, sendWithEnter: true, newChatKey: "k", saveHistory: true };
 const isMobileViewport = () => typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches;
+const isManagedPreviewRequest = (value: string) =>
+  /\b(?:start|run|launch|open|put|serve|host)\b[\s\S]{0,55}\b(?:dev|development|local|preview|http|web)?\s*server\b/i.test(value)
+  || /\b(?:preview|serve)\s+(?:it|this|the\s+(?:site|app|project|page))\b/i.test(value);
 const LIBRARY_VIEWS: View[] = ["connectors", "skills", "workflows"];
 // Views reachable while in Chat mode. Everything else (tasks, proof, projects,
 // work intake, library, artifacts) belongs to Code/Pair mode.
@@ -1487,6 +1490,24 @@ export default function Home() {
         setBusy(false); busyRef.current = false; openPair();
         return;
       }
+      // A preview request is infrastructure, not a model task. Delegating it
+      // previously let a model spawn a disposable Python process and invent a
+      // Vercel hostname for a port that only existed on the user's computer.
+      if (isManagedPreviewRequest(text)) {
+        try {
+          previewDismissedRef.current.delete(sid);
+          const found = await checkPreview(sid, 0, true, true);
+          const url = previewUrlRef.current;
+          applyRelay(found && url
+            ? `Your local dev server is running at [${url}](${url}). I opened it in **Preview** beside this chat.`
+            : "I couldn't find a previewable app in this project yet. Create the project files first, then open Preview.", false);
+        } catch (error: any) {
+          applyRelay(error?.message || "The local project server could not start.", false);
+        } finally {
+          setBusy(false); busyRef.current = false;
+        }
+        return;
+      }
       try {
         const enq = await fetchWithin("/api/agent/enqueue", {
           method: "POST",
@@ -1521,6 +1542,7 @@ export default function Home() {
         let ans = "";
         const started = Date.now();
         let lastPresenceCheck = started;
+        let offlineSince = 0;
         while (!ac.signal.aborted) {
           const ev = await fetchWithin(`/api/agent/events?job=${activeRunId}&cursor=${cursor}`, { cache: "no-store" }, 8_000)
             .then(async (response) => response.ok ? response.json() : null)
@@ -1541,15 +1563,24 @@ export default function Home() {
               .then(async (response) => response.ok ? response.json() : null)
               .catch(() => null);
             if (presence?.hosted && !presence.agentConnected) {
-              ans += `${ans ? "\n\n" : ""}Hyzr went offline. Reopen **hyzr.cmd** and try again.`;
               setAgentPaired(false);
-              break;
+              offlineSince ||= Date.now();
+              if (Date.now() - offlineSince > 90_000) {
+                ans += `${ans ? "\n\n" : ""}The Hyzr terminal has been offline for over a minute. Reopen **hyzr.cmd** and try again.`;
+                break;
+              }
+            } else if (presence?.agentConnected) {
+              offlineSince = 0;
+              setAgentPaired(true);
             }
           }
           if (Date.now() - started > 10 * 60 * 1000) { ans += "\n\n_(Timed out waiting for the agent.)_"; break; }
           await new Promise((r) => setTimeout(r, 35));
         }
         applyRelay(ans || "The agent returned no output.", false);
+        if (previewOpen || autoPreviewRunRef.current) {
+          await checkPreview(sid, 500, previewOpen);
+        }
       } catch (e: any) {
         if (!(e?.name === "AbortError" && ac.signal.aborted)) {
           applyRelay("Could not reach your paired computer in time. Reopen **hyzr.cmd** and try again.", false);
@@ -1995,21 +2026,9 @@ export default function Home() {
       return;
     }
     previewDismissedRef.current.delete(currentId);
-    const directWindow = window.location.protocol === "https:"
-      ? window.open("", "hyzr-local-preview")
-      : null;
-    if (directWindow) {
-      directWindow.document.title = "Starting local preview";
-      directWindow.document.body.innerHTML = "<p style=\"font:14px system-ui;padding:24px\">Starting the project on your computer…</p>";
-    }
     setPreviewStarting(true);
     const found = await checkPreview(currentId, 0, false, true);
     setPreviewStarting(false);
-    if (found && directWindow && previewUrlRef.current) {
-      directWindow.location.replace(previewUrlRef.current);
-    } else if (directWindow) {
-      directWindow.close();
-    }
     if (!found) setToast((current) => current || "No previewable app has been created in this project yet");
   }
   function regenerate() {
@@ -2905,18 +2924,12 @@ function PreviewPane({
   const [dragging, setDragging] = useState(false);
   const [files, setFiles] = useState<{ name: string; path: string; type: "file" | "dir"; size?: number }[]>([]);
   const [showFiles, setShowFiles] = useState(false);
-  const [mobile, setMobile] = useState(false);
   const [securePage, setSecurePage] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set());
   const [openFile, setOpenFile] = useState<{ path: string; content?: string; error?: string } | null>(null);
 
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 760px)");
-    const sync = () => setMobile(query.matches);
-    sync();
     setSecurePage(window.location.protocol === "https:");
-    query.addEventListener("change", sync);
-    return () => query.removeEventListener("change", sync);
   }, []);
 
   useEffect(() => {
@@ -2972,8 +2985,13 @@ function PreviewPane({
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }
+  // The dev server itself remains on localhost/LAN. HTTPS pages cannot embed an
+  // HTTP origin directly, so the production side pane streams that same local
+  // server through the authenticated paired-agent transport.
   const previewSrc = serverUrl
-    ? `${serverUrl}${serverUrl.includes("?") ? "&" : serverUrl.endsWith("/") ? "?" : "/?"}n=${nonce}`
+    ? securePage
+      ? `/preview/_dev/${encodeURIComponent(sessionId)}/?n=${nonce}`
+      : `${serverUrl}${serverUrl.includes("?") ? "&" : serverUrl.endsWith("/") ? "?" : "/?"}n=${nonce}`
     : `/preview/_s/${encodeURIComponent(sessionId)}/${entry}?n=${nonce}`;
   return (
     <div className="preview-pane" style={{ width }}>
@@ -3034,27 +3052,14 @@ function PreviewPane({
               </div>}
           </aside>
         )}
-        {(mobile || securePage) && serverUrl?.startsWith("http://") ? (
-          <div className="preview-direct">
-            <span><IconGlobe size={20} /></span>
-            <strong>{mobile ? "Preview on this Wi-Fi network" : "Local preview ready"}</strong>
-            <p>The project is running directly on your computer, not on Hyzr or Vercel.</p>
-            <code>{serverUrl}</code>
-            <a href={previewSrc} target="_blank" rel="noreferrer">{mobile ? "Open Wi-Fi preview" : "Open localhost preview"} <IconExternal size={14} /></a>
-            <small>{mobile
-              ? "Keep the Hyzr terminal open and connect this phone to the same Wi-Fi as your computer."
-              : "Your browser keeps HTTP localhost outside the HTTPS Hyzr frame, so the real dev server opens in its own tab."}</small>
-          </div>
-        ) : (
-          <iframe
-            key={nonce}
-            src={previewSrc}
-            className="preview-frame"
-            title="preview"
-            style={{ pointerEvents: dragging ? "none" : "auto" }}
-            sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
-          />
-        )}
+        <iframe
+          key={nonce}
+          src={previewSrc}
+          className="preview-frame"
+          title="preview"
+          style={{ pointerEvents: dragging ? "none" : "auto" }}
+          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
+        />
       </div>
     </div>
   );

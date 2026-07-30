@@ -1,5 +1,8 @@
 export const AGENT_PROTOCOL_VERSION = 2;
-export const AGENT_ONLINE_WINDOW_MS = 25_000;
+// A dedicated launcher heartbeat normally arrives every five seconds. Keep a
+// wider compatibility window for older launchers that only refresh presence
+// when polling or streaming a result.
+export const AGENT_ONLINE_WINDOW_MS = 60_000;
 
 export type AgentEngine = "claude" | "codex";
 export type AgentPermissionMode = "workspace" | "full-access";
