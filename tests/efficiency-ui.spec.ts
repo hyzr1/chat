@@ -132,8 +132,8 @@ test("terminal device approval is centered and uses the canonical mark", async (
   const cardBox = await page.locator(".device-pair-card").boundingBox();
   expect(cardBox).not.toBeNull();
   expect(Math.abs(cardBox!.x + cardBox!.width / 2 - 720)).toBeLessThanOrEqual(1);
-  await expect(page.locator(".device-pair-brand .hyzr-mark img")).toHaveAttribute("src", "/hyzr-chat-mark.svg?v=3");
-  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /hyzr-chat-mark\.svg\?v=3/);
+  await expect(page.locator(".device-pair-brand .hyzr-mark img")).toHaveAttribute("src", "/hyzr-chat-mark.svg?v=4");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /hyzr-chat-mark\.svg\?v=4/);
 });
 
 test("hosted computer setup is a compact self-pairing terminal download", async ({ page }) => {

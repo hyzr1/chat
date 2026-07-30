@@ -5,7 +5,7 @@ export function HyzrMark({ size = 24, className = "" }: { size?: number; classNa
       style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      <img src="/hyzr-chat-mark.svg?v=3" alt="" draggable={false} />
+      <img src="/hyzr-chat-mark.svg?v=4" alt="" draggable={false} />
     </span>
   );
 }
