@@ -2555,7 +2555,7 @@ export default function Home() {
                 </div></div>
                 <div className="pair-step"><span className="pair-step-n">2</span><div>
                   <b>Open it and enter this code</b>
-                  <span>The code expires after 15 minutes and can be claimed only once.</span>
+                  <span>The code expires after 15 minutes and can be claimed only once. Keep Full developer access selected for normal Git and full local-agent behavior, or choose the restricted project-only mode.</span>
                   {pairLink && <a className="pair-primary" style={{ display: "inline-flex", justifyContent: "center", marginTop: 8, textDecoration: "none" }} href={pairLink}>Open Hyzr Agent</a>}
                   <div className="pair-field" style={{ marginTop: 8 }}>
                     <code style={{ fontSize: 18, letterSpacing: "0.16em" }}>{pairCode || "······"}</code>
@@ -2570,7 +2570,11 @@ export default function Home() {
               )}
               <div className="pair-perms">
                 <IconShield size={14} />
-                <span>The agent makes outbound connections only. Provider credentials stay on your computer; project files cross the bridge only for visible file, Git, or preview requests.</span>
+                <span>{agentPaired
+                  ? agentInfo?.permissionMode === "full-access"
+                    ? "Full developer access is enabled. Claude and Codex can use normal local commands, Git metadata, and filesystem context under your signed-in account."
+                    : "Project-only mode is enabled. File edits stay in the projects folder; Codex protects Git metadata and cannot access the rest of the filesystem."
+                  : "The agent makes outbound connections only. Provider credentials stay on your computer; you choose full developer access or restricted project-only access before pairing."}</span>
               </div>
               <div className="pair-actions">
                 {agentPaired

@@ -127,7 +127,7 @@ ipcMain.handle("agent:defaults", async () => {
   return {
     relay: saved.relay || "https://chat.hyzr.ai",
     workspaceRoot: saved.workspaceRoot || path.join(os.homedir(), "Hyzr Workspaces"),
-    permissionMode: saved.permissionMode || "workspace",
+    permissionMode: saved.permissionMode || "full-access",
     state,
     platform: process.platform,
     version: app.getVersion(),

@@ -35,7 +35,10 @@ and receives a one-use six-character code:
 1. Download the Windows, macOS, or Linux installer.
 2. Open Hyzr Agent and enter the pairing code.
 3. Choose the projects directory.
-4. Keep workspace-only access or explicitly enable full filesystem access.
+4. Confirm **Full developer access** (the installer default) for normal local
+   commands, Git metadata, and filesystem context. Users who prefer a stricter
+   boundary can select **Projects folder only**; Codex's workspace-write sandbox
+   intentionally protects `.git` metadata in that mode.
 
 The agent starts on login, reconnects after sleep or network changes, and
 detects Claude Code, Codex, Git, GitHub CLI, and npm independently. It stores

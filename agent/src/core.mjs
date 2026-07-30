@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 2;
-const VERSION = "1.0.0";
+const VERSION = "1.0.5";
 const IS_WIN = process.platform === "win32";
 const DEFAULT_ROOT = path.join(os.homedir(), "Hyzr Workspaces");
 const STATE_ROOT = path.join(os.homedir(), ".hyzr", "agent");
@@ -50,12 +50,22 @@ async function ask(question, fallback = "") {
   }));
 }
 
+function selectExecutable(candidates, windows = IS_WIN) {
+  if (!windows) return candidates[0] || null;
+  // npm's .cmd launcher is runnable by child_process. A later WindowsApps
+  // .exe candidate may be an App Execution Alias that returns EPERM to a
+  // background desktop process, so prefer the command shim when present.
+  return candidates.find((item) => /\.(cmd|bat)$/i.test(item))
+    || candidates.find((item) => /\.(exe|com)$/i.test(item))
+    || candidates[0]
+    || null;
+}
+
 async function locate(command) {
   try {
     const { stdout } = await execFileAsync(IS_WIN ? "where.exe" : "which", [command], { timeout: 4000, windowsHide: true });
     const candidates = stdout.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
-    if (!IS_WIN) return candidates[0] || null;
-    return candidates.find((item) => /\.(exe|com)$/i.test(item)) || candidates[0] || null;
+    return selectExecutable(candidates);
   } catch {
     return null;
   }
@@ -64,11 +74,30 @@ async function locate(command) {
 async function commandVersion(commandPath) {
   if (!commandPath) return null;
   try {
-    const { stdout, stderr } = await execFileAsync(commandPath, ["--version"], { timeout: 5000, windowsHide: true });
+    const launch = commandLaunch(commandPath, ["--version"]);
+    const { stdout, stderr } = await execFileAsync(launch.command, launch.args, {
+      timeout: 5000,
+      windowsHide: true,
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
+    });
     return (stdout || stderr).trim().split(/\r?\n/)[0]?.slice(0, 100) || null;
   } catch {
     return null;
   }
+}
+
+function cmdQuote(value) {
+  return `"${String(value).replace(/[\r\n]/g, " ").replace(/%/g, "%%").replace(/"/g, '""')}"`;
+}
+
+function commandLaunch(command, args) {
+  if (!(IS_WIN && /\.(cmd|bat)$/i.test(command))) return { command, args, windowsVerbatimArguments: false };
+  const shell = process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe";
+  return {
+    command: shell,
+    args: ["/d", "/s", "/c", `call ${cmdQuote(command)} ${args.map(cmdQuote).join(" ")}`],
+    windowsVerbatimArguments: true,
+  };
 }
 
 function safeWorkspace(root, workspaceId) {
@@ -144,10 +173,11 @@ async function post(relay, pathname, body, attempts = 4) {
 
 function runProcess(command, args, prompt, cwd, onLine) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
+    const launch = commandLaunch(command, args);
+    const child = spawn(launch.command, launch.args, {
       cwd,
       windowsHide: true,
-      shell: IS_WIN && /\.(cmd|bat)$/i.test(command),
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
       env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -234,9 +264,15 @@ async function runClaude({ command, job, cwd, priorSession, permissionMode, emit
 
 async function runCodex({ command, job, cwd, priorSession, permissionMode, emit }) {
   const model = providerModel("codex", job.model);
+  const requestedEffort = String(job.effort || "").toLowerCase();
+  const effort = requestedEffort === "ultra"
+    ? "xhigh"
+    : ["low", "medium", "high", "xhigh"].includes(requestedEffort)
+      ? requestedEffort
+      : "";
   const common = [
     ...(model ? ["--model", model] : []),
-    ...(job.effort ? ["-c", `model_reasoning_effort="${job.effort === "ultra" ? "xhigh" : job.effort}"`] : []),
+    ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []),
     "--json",
     "--skip-git-repo-check",
     ...(permissionMode === "full-access"
@@ -322,10 +358,11 @@ async function startPreviewServer(context, workspaceId) {
   const npm = context.tools.npm;
   if (!npm) throw new Error("Node.js/npm is not available to start this project.");
   const port = 43100 + Math.floor(Math.random() * 90);
-  const child = spawn(npm, ["run", script, "--", "--port", String(port)], {
+  const launch = commandLaunch(npm, ["run", script, "--", "--port", String(port)]);
+  const child = spawn(launch.command, launch.args, {
     cwd: workspace,
     windowsHide: true,
-    shell: IS_WIN && /\.(cmd|bat)$/i.test(npm),
+    windowsVerbatimArguments: launch.windowsVerbatimArguments,
     detached: false,
     env: { ...process.env, BROWSER: "none", PORT: String(port), HOST: "127.0.0.1", NO_COLOR: "1" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -503,7 +540,7 @@ async function handleRpc(job, context) {
 async function handleRun(job, context) {
   const workspace = safeWorkspace(context.workspaceRoot, job.workspaceId);
   await mkdir(workspace, { recursive: true });
-  const sessions = await readJson(SESSIONS_FILE, {});
+  const sessions = await readJson(context.sessionsFile, {});
   const planned = specialistPlan(job, context.tools);
   const tasks = planned.length ? planned : [{
     label: "Agent",
@@ -572,7 +609,7 @@ async function handleRun(job, context) {
         conversationId: cleanId(job.conversationId),
         updatedAt: Date.now(),
       };
-      await writeJson(SESSIONS_FILE, sessions);
+      await writeJson(context.sessionsFile, sessions);
     }
   }
 }
@@ -632,7 +669,16 @@ export async function startAgent(options = {}) {
       .catch((error) => log("could not deliver an event:", error.message));
     return writeChain;
   };
-  const context = { relay, token, tools, capabilities, workspaceRoot, permissionMode, emit };
+  const context = {
+    relay,
+    token,
+    tools,
+    capabilities,
+    workspaceRoot,
+    permissionMode,
+    sessionsFile: options.sessionsFile || SESSIONS_FILE,
+    emit,
+  };
   options.onStatus?.({ connected: true, capabilities });
 
   let failures = 0;
@@ -682,8 +728,8 @@ export async function runAgentCli() {
   const code = String(args.code || process.env.HYZR_CODE || await ask("Pairing code: ")).toUpperCase();
   const requestedRoot = args.workspace || saved.workspaceRoot || DEFAULT_ROOT;
   const workspaceRoot = await ask(`Workspace folder [${requestedRoot}]: `, requestedRoot);
-  const permissionInput = await ask("Permissions: [1] workspace only (recommended), [2] full filesystem: ", "1");
-  const permissionMode = permissionInput === "2" ? "full-access" : "workspace";
+  const permissionInput = await ask("Permissions: [1] full developer access, [2] projects folder only: ", "1");
+  const permissionMode = permissionInput === "2" ? "workspace" : "full-access";
   log(`connecting to ${relay}`);
   log(`projects stay in ${workspaceRoot}`);
   log(permissionMode === "workspace" ? "workspace-only permissions enabled" : "full filesystem access enabled");
@@ -694,4 +740,4 @@ export async function loadAgentConfig() {
   return readJson(CONFIG_FILE, {});
 }
 
-export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, engineFor, providerModel, previewEntry, specialistPlan };
+export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, previewEntry, specialistPlan };

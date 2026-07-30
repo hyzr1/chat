@@ -27,8 +27,8 @@
         <label>Projects folder<span class="folder-row"><input id="workspace" required /><button id="browse" type="button">Choose</button></span></label>
         <fieldset>
           <legend>Filesystem access</legend>
-          <label class="choice"><input type="radio" name="permission" value="workspace" checked /><span><strong>Projects folder only</strong><small>Recommended. Models can edit and run commands inside each isolated project.</small></span></label>
-          <label class="choice"><input type="radio" name="permission" value="full-access" /><span><strong>Full filesystem</strong><small>Matches an unrestricted local agent. Only enable this on a computer and account you trust.</small></span></label>
+          <label class="choice"><input type="radio" name="permission" value="full-access" checked /><span><strong>Full developer access</strong><small>Normal Hyzr mode. Enables unrestricted local context, commands, and Git metadata like a local coding agent. Use only on a computer and account you trust.</small></span></label>
+          <label class="choice"><input type="radio" name="permission" value="workspace" /><span><strong>Projects folder only</strong><small>Safer restricted mode. Models can edit project files, but Codex intentionally protects Git metadata and cannot access files outside this folder.</small></span></label>
         </fieldset>
         <label class="check"><input id="startup" type="checkbox" checked /><span>Start Hyzr Agent when I sign in</span></label>
         <button class="primary" id="pair" type="submit">Pair computer</button>
@@ -46,4 +46,3 @@
     <script src="./renderer.js"></script>
   </body>
 </html>
-

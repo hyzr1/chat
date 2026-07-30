@@ -11,18 +11,40 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const execFileAsync = promisify(execFile);
+const IS_WIN = process.platform === "win32";
+
+function cmdQuote(value: string) {
+  return `"${String(value).replace(/[\r\n]/g, " ").replace(/%/g, "%%").replace(/"/g, '""')}"`;
+}
 
 // Detect a CLI on PATH and, when present, grab its version string.
 async function detect(command: string, versionArgs = ["--version"]) {
-  const locator = process.platform === "win32" ? "where.exe" : "which";
+  const locator = IS_WIN ? "where.exe" : "which";
+  let commandPath = command;
   try {
-    await execFileAsync(locator, [command], { timeout: 2500, windowsHide: true });
+    const { stdout } = await execFileAsync(locator, [command], { timeout: 2500, windowsHide: true });
+    const candidates = stdout.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    commandPath = IS_WIN
+      ? candidates.find((item) => /\.(cmd|bat)$/i.test(item))
+        || candidates.find((item) => /\.(exe|com)$/i.test(item))
+        || candidates[0]
+      : candidates[0];
+    if (!commandPath) throw new Error("Command not found.");
   } catch {
     return { available: false as const, version: null as string | null };
   }
   let version: string | null = null;
   try {
-    const { stdout } = await execFileAsync(command, versionArgs, { timeout: 3000, windowsHide: true, shell: process.platform === "win32" });
+    const isCommandShim = IS_WIN && /\.(cmd|bat)$/i.test(commandPath);
+    const executable = isCommandShim ? process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe" : commandPath;
+    const args = isCommandShim
+      ? ["/d", "/s", "/c", `call ${cmdQuote(commandPath)} ${versionArgs.map(cmdQuote).join(" ")}`]
+      : versionArgs;
+    const { stdout } = await execFileAsync(executable, args, {
+      timeout: 3000,
+      windowsHide: true,
+      windowsVerbatimArguments: isCommandShim,
+    });
     version = stdout.trim().split(/\r?\n/)[0]?.slice(0, 60) || null;
   } catch {}
   return { available: true as const, version };

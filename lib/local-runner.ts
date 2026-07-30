@@ -62,12 +62,29 @@ let tmpSeq = 0;
 function nativeCli(cmd: string) {
   if (!IS_WIN) return cmd;
   const npmRoot = process.env.APPDATA ? path.join(process.env.APPDATA, "npm", "node_modules") : "";
+  const npmBin = process.env.APPDATA ? path.join(process.env.APPDATA, "npm") : "";
   const candidates = cmd === "claude" ? [
     path.join(npmRoot, "@anthropic-ai", "claude-code", "bin", "claude.exe"),
+    path.join(npmBin, "claude.cmd"),
   ] : cmd === "codex" ? [
     path.join(npmRoot, "@openai", "codex", "node_modules", "@openai", "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe"),
   ] : [];
   return candidates.find((candidate) => candidate && existsSync(candidate)) || cmd;
+}
+
+function cmdQuote(value: string) {
+  return `"${String(value).replace(/[\r\n]/g, " ").replace(/%/g, "%%").replace(/"/g, '""')}"`;
+}
+
+function commandLaunch(command: string, args: string[]) {
+  if (!(IS_WIN && /\.(cmd|bat)$/i.test(command))) {
+    return { command, args, windowsVerbatimArguments: false };
+  }
+  return {
+    command: process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe",
+    args: ["/d", "/s", "/c", `call ${cmdQuote(command)} ${args.map(cmdQuote).join(" ")}`],
+    windowsVerbatimArguments: true,
+  };
 }
 
 // Codex returns its whole message at once (no token deltas). To match Claude's
@@ -157,7 +174,12 @@ async function* spawnLines(
   // Native provider executables avoid shell interpolation entirely. The shell
   // fallback supports nonstandard Windows installs; every argument is still
   // selected by Hyzr Chat and the user prompt always travels over stdin.
-  const child = spawn(executable, args, { shell: IS_WIN && executable === cmd, cwd, windowsHide: true });
+  const launch = commandLaunch(executable, args);
+  const child = spawn(launch.command, launch.args, {
+    cwd,
+    windowsHide: true,
+    windowsVerbatimArguments: launch.windowsVerbatimArguments,
+  });
   let aborted = false;
   const stop = () => {
     aborted = true;

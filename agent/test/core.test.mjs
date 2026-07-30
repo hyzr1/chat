@@ -55,3 +55,21 @@ test("broad product work becomes a bounded mixed-provider specialist graph", () 
 test("small prompts avoid orchestration overhead", () => {
   assert.deepEqual(__test.specialistPlan({ plan: true, prompt: "Fix typo" }, { claude: "claude", codex: "codex" }), []);
 });
+
+test("Windows command discovery prefers executable shims over extensionless npm shims", () => {
+  const candidates = [
+    "C:\\Users\\test\\AppData\\Roaming\\npm\\claude",
+    "C:\\Users\\test\\AppData\\Roaming\\npm\\claude.cmd",
+  ];
+  assert.equal(__test.selectExecutable(candidates, true), candidates[1]);
+  assert.equal(
+    __test.selectExecutable([...candidates, "C:\\tools\\claude.exe"], true),
+    candidates[1],
+  );
+});
+
+test("Windows command arguments cannot break out of their quoted launcher", () => {
+  assert.equal(__test.cmdQuote("safe&echo injected"), '"safe&echo injected"');
+  assert.equal(__test.cmdQuote("100% ready"), '"100%% ready"');
+  assert.equal(__test.cmdQuote("line\r\nbreak"), '"line  break"');
+});
