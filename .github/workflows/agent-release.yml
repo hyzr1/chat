@@ -17,7 +17,7 @@ jobs:
           - os: windows-latest
             command: npm run build -- --win --publish never
           - os: macos-latest
-            command: npm run build -- --mac --publish never
+            command: npm run build -- --mac --x64 --arm64 --publish never
           - os: ubuntu-latest
             command: npm run build -- --linux --publish never
     runs-on: ${{ matrix.os }}
