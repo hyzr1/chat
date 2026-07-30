@@ -98,23 +98,24 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #f8f8f6;
-  --sidebar: #f1f1ee;
+  /* Clean cool white — no warm/sand tint. Perplexity/z.ai minimal. */
+  --bg: #ffffff;
+  --sidebar: #f7f7f8;
   --panel: #ffffff;
-  --panel-2: #eeeeeb;
-  --panel-hi: #e5e5e1;
-  --field: #fafaf8;
-  --border: rgba(20, 20, 18, 0.09);
-  --border-strong: rgba(20, 20, 18, 0.16);
-  --text: #191918;
-  --text-soft: #5d5d59;
-  --text-faint: #888883;
-  --accent: #088b9a;
-  --accent-ink: #087886;
-  --accent-soft: rgba(8, 139, 154, 0.10);
-  --accent-border: rgba(8, 139, 154, 0.34);
-  --ok: #158557;
-  --warn: #a96918;
+  --panel-2: #f2f2f4;
+  --panel-hi: #eaeaee;
+  --field: #ffffff;
+  --border: rgba(18, 18, 22, 0.08);
+  --border-strong: rgba(18, 18, 22, 0.14);
+  --text: #17171b;
+  --text-soft: #5b5b64;
+  --text-faint: #8a8a93;
+  --accent: #0b8f9e;
+  --accent-ink: #0a7d8a;
+  --accent-soft: rgba(11, 143, 158, 0.10);
+  --accent-border: rgba(11, 143, 158, 0.30);
+  --ok: #128a5a;
+  --warn: #a5701d;
 }
 
 * {
@@ -948,32 +949,55 @@ select {
   justify-content: center;
   padding: 0 20px 5vh;
 }
-.home-intro { width: 100%; max-width: 760px; margin-bottom: 24px; text-align: left; }
-.home-mark {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 18px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--panel);
-  color: var(--text);
+/* Minimal, centered empty state — Perplexity/z.ai style. */
+.home-intro { width: 100%; max-width: 720px; margin-bottom: 26px; text-align: center; }
+.home-mark { display: none; }
+.home-kicker {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--accent-ink);
+  font-size: 14px;
+  font-weight: 560;
+  letter-spacing: -0.01em;
 }
 .home-intro h1 {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   color: var(--text);
-  font-size: clamp(27px, 3vw, 36px);
-  font-weight: 570;
-  letter-spacing: -.035em;
+  font-size: clamp(30px, 3.6vw, 44px);
+  font-weight: 500;
+  letter-spacing: -.03em;
+  line-height: 1.08;
 }
 .home-intro p {
-  max-width: 610px;
-  margin: 0;
+  max-width: 520px;
+  margin: 0 auto;
   color: var(--text-faint);
   font-size: 14px;
   line-height: 1.55;
 }
+/* Agent mode gets its own personality: a soft accent glow (Perplexity's
+   Computer mode). Only on the empty-state composer, kept subtle. */
+:root[data-workmode="code"] .center .composer {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 1px var(--accent-soft), 0 8px 40px -12px var(--accent-soft),
+    0 0 60px -18px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+:root[data-workmode="code"] .center .composer::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 55%, transparent), transparent 40%, transparent 60%, color-mix(in srgb, var(--accent) 40%, transparent));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.7;
+  pointer-events: none;
+  animation: agent-sheen 5s ease-in-out infinite;
+}
+@keyframes agent-sheen { 50% { opacity: 0.35; } }
+:root[data-motion="reduced"] .center .composer::after { animation: none; }
 
 /* ---------------- Composer ---------------- */
 .composer {

@@ -579,7 +579,7 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("local");
   const [planOn, setPlanOn] = useState(true);
   const [effort, setEffort] = useState<Effort>("high");
-  const [theme, setTheme] = useState<Theme>("system");
+  const [theme, setTheme] = useState<Theme>("light");
   const [productPrefs, setProductPrefs] = useState<ProductPrefs>(DEFAULT_PRODUCT_PREFS);
   const [view, setView] = useState<View>("chat");
   const [workMode, setWorkMode] = useState<WorkMode>("chat");
@@ -901,6 +901,10 @@ export default function Home() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.dataset.workmode = workMode;
+  }, [workMode]);
 
   useEffect(() => {
     document.documentElement.dataset.motion = productPrefs.reducedMotion ? "reduced" : "full";
@@ -1870,7 +1874,7 @@ export default function Home() {
         <div className="side-top">
           <div className="brand">
             <div className="logo"><HyzrMark size={22} /></div>
-            <span className="word"><b>Hyzr</b><em>Chat</em></span>
+            <span className="word"><b>Hyzr</b></span>
           </div>
           <button className="side-icon" onClick={() => setCollapsed(true)} title="Collapse">
             <IconPanelLeft size={17} />
@@ -1881,7 +1885,7 @@ export default function Home() {
             <IconSearch size={15} /> Chat
           </button>
           <button role="tab" aria-selected={workMode === "code"} className={workMode === "code" ? "on" : ""} onClick={() => switchWorkMode("code")}>
-            <IconCode size={15} /> Code
+            <IconTerminal size={15} /> Agent
           </button>
         </div>
         <button className="new-btn" onClick={newChat}>
@@ -2075,10 +2079,11 @@ export default function Home() {
           <div className="center">
             <div className="home-intro">
               <span className="home-mark"><HyzrMark size={22} /></span>
-              <h1>{workMode === "chat" ? "Ask Hyzr anything" : "What are you building?"}</h1>
+              <span className="home-kicker">{workMode === "chat" ? "Chat" : "Agent"}</span>
+              <h1>{workMode === "chat" ? "What do you want to know?" : "What should we build?"}</h1>
               <p>{workMode === "chat"
-                ? "A fast, routed answer engine. Ask a question and Hyzr picks the right model. Switch to Code to build in a paired workspace."
-                : "Describe the outcome. Hyzr Chat will plan the work, choose the right models, and build in an isolated project."}</p>
+                ? "A fast answer engine. Ask anything and Hyzr routes it to the right model. Switch to Agent to build in a paired workspace."
+                : "Describe the outcome. Hyzr plans the work, routes each task to the right model, and builds it in an isolated, verified workspace."}</p>
             </div>
             {composer}
             <div className="suggestions">
