@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 2;
-const VERSION = "1.1.3";
+const VERSION = "1.1.4";
 const IS_WIN = process.platform === "win32";
 const DEFAULT_ROOT = path.join(os.homedir(), "Hyzr");
 const STATE_ROOT = path.join(os.homedir(), ".hyzr", "agent");
@@ -201,11 +201,9 @@ function providerModel(engine, requested) {
 
 function transcript(job) {
   const history = Array.isArray(job.history) ? job.history.slice(-16) : [];
-  const previewRule = "Hyzr manages local preview servers itself. Do not start a persistent/background HTTP or dev server, and never invent a public or Vercel URL for a local port. Create the project files and package scripts; Hyzr will start and display the local server.";
-  if (!history.length) return `${previewRule}\n\nUser: ${String(job.prompt)}`;
+  if (!history.length) return String(job.prompt);
   return [
     "This is a resumed Hyzr web conversation. Preserve continuity within this workspace.",
-    previewRule,
     ...history.map((message) => `${message.role === "assistant" ? "Assistant" : "User"}: ${String(message.content || "").slice(0, 8000)}`),
     `User: ${String(job.prompt)}`,
   ].join("\n\n");
@@ -593,50 +591,13 @@ async function startPreviewServer(context, workspaceId) {
       }
     } catch {}
   }
-  const npm = context.tools.npm;
-  if (!npm) throw new Error("Node.js/npm is not available to start this project.");
-  if (previewServers.size >= PREVIEW_SERVER_LIMIT) {
-    const oldest = [...previewServers.entries()].sort((a, b) =>
-      Number(a[1].lastUsed || a[1].startedAt || 0) - Number(b[1].lastUsed || b[1].startedAt || 0),
-    )[0];
-    if (oldest) stopPreviewRecord(oldest[0], oldest[1]);
+  // Preview is deliberately passive for framework projects. Claude/Codex owns
+  // shell commands and long-running processes; the bridge only discovers and
+  // displays a server after the coding agent has started it.
+  if (!declaredPort) {
+    throw new Error(`No running dev server was found and the "${script}" script does not declare a detectable port. Ask Agent to start it on a specific port.`);
   }
-  const port = 43100 + Math.floor(Math.random() * 800);
-  const launch = commandLaunch(npm, ["run", script, "--", "--port", String(port), ...previewHostArgs(scriptCommand)]);
-  const child = spawn(launch.command, launch.args, {
-    cwd: workspace,
-    windowsHide: true,
-    windowsVerbatimArguments: launch.windowsVerbatimArguments,
-    detached: !IS_WIN,
-    env: {
-      ...process.env,
-      BROWSER: "none",
-      PORT: String(port),
-      HOST: "0.0.0.0",
-      NO_COLOR: "1",
-      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --max-old-space-size=768`.trim(),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let output = "";
-  child.stdout?.on("data", (chunk) => { output = `${output}${chunk}`.slice(-12_000); });
-  child.stderr?.on("data", (chunk) => { output = `${output}${chunk}`.slice(-12_000); });
-  const record = { child, server: null, port, workspace, startedAt: Date.now(), lastUsed: Date.now(), attached: false, lanAvailable: true };
-  child.once("close", () => {
-    if (previewServers.get(id) === record) stopPreviewRecord(id, record);
-  });
-  previewServers.set(id, record);
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode != null) throw new Error(output.trim() || `The ${script} script exited with code ${child.exitCode}.`);
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1200) });
-      if (response.status < 500) return previewDetails(port, { reused: false, attached: false, static: false });
-    } catch {}
-    await sleep(350);
-  }
-  stopPreviewRecord(id, previewServers.get(id));
-  throw new Error(`The project server did not become ready on port ${port}.\n${output.trim()}`.trim());
+  throw new Error(`No server is listening on port ${declaredPort}. Ask Agent to run the project's "${script}" command; Preview will attach after it starts.`);
 }
 
 function previewPortFor(manifest, script = "") {
@@ -819,7 +780,9 @@ async function handleRun(job, context) {
 
   for (let index = 0; index < tasks.length; index++) {
     const task = tasks[index];
-    const sessionKey = `${cleanId(job.conversationId)}:${task.engine}`;
+    // Version the provider session key so an agent upgrade cannot resume a
+    // thread containing obsolete bridge instructions.
+    const sessionKey = `${VERSION}:${cleanId(job.conversationId)}:${task.engine}`;
     const priorSession = sessions[sessionKey]?.sessionId || "";
     const finalTask = index === tasks.length - 1;
     await context.emit(
@@ -1097,7 +1060,7 @@ export async function loadAgentConfig() {
   return readJson(CONFIG_FILE, {});
 }
 
-export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, previewEntry, previewPortFor, previewHostArgs, previewListenerPidsFromNetstat, privateLanAddress, startPreviewServer, sweepPreviewServers, streamSeparator, specialistPlan };
+export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, transcript, previewEntry, previewPortFor, previewHostArgs, previewListenerPidsFromNetstat, privateLanAddress, startPreviewServer, sweepPreviewServers, streamSeparator, specialistPlan };
 
 runAgentCli().catch((error) => {
   console.error("\n  Hyzr stopped —", error instanceof Error ? error.message : error);

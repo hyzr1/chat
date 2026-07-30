@@ -1518,12 +1518,34 @@ export default function Home() {
         }
         return copy;
       });
-      if (!pairedNow) {
+      if (!pairedNow && !agentNow) {
         applyRelay(agentNow
           ? "Hyzr is offline. Reopen **hyzr.cmd** on your computer and leave the terminal open."
           : "Connect your computer first — download the tiny Hyzr terminal launcher and enter the code it asks for.", false);
         setBusy(false); busyRef.current = false; openPair();
         return;
+      }
+      if (!pairedNow && agentNow) {
+        applyRelay(`Waiting for **${agentNow.host || "your computer"}**. Reopen **hyzr.cmd** — this request will continue automatically.`, true);
+        const reconnectDeadline = Date.now() + 2 * 60_000;
+        while (!pairedNow && !ac.signal.aborted && Date.now() < reconnectDeadline) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+          try {
+            const response = await fetchWithin("/api/setup", { cache: "no-store" }, 6_000);
+            if (!response.ok) continue;
+            const setup = await response.json();
+            pairedNow = Boolean(setup.agentConnected);
+            agentNow = setup.agent || agentNow;
+            setAgentPaired(pairedNow);
+            setAgentInfo(agentNow);
+          } catch {}
+        }
+        if (!pairedNow) {
+          applyRelay("Your request is saved, but the computer is still offline. Reopen **hyzr.cmd**, then press **Regenerate** to continue.", false);
+          setBusy(false); busyRef.current = false;
+          return;
+        }
+        applyRelay(`Connected to **${agentNow?.host || "your computer"}**. Starting your request now…`, true);
       }
       try {
         const enq = await fetchWithin("/api/agent/enqueue", {

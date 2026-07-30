@@ -321,21 +321,25 @@ test("a compound build and dev-server prompt reaches the coding agent", async ({
   await expect(page.getByText(/couldn't find a previewable app/i)).toHaveCount(0);
 });
 
-test("Agent send waits for presence and never leaves an offline request analyzing", async ({ page }) => {
+test("Agent send waits for a known computer to reconnect and continues automatically", async ({ page }) => {
   await createTestAccount(page);
+  let sending = false;
+  let sendSetupCalls = 0;
   await page.route("**/api/setup", async (route) => {
+    if (sending) sendSetupCalls += 1;
     await new Promise((resolve) => setTimeout(resolve, 700));
+    const connected = sending && sendSetupCalls >= 2;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         hosted: true,
-        agentConnected: false,
-        ready: false,
+        agentConnected: connected,
+        ready: connected,
         agent: {
           host: "My PC",
           platform: "win32",
-          version: "1.1.2",
+          version: "1.1.3",
           node: "v24",
           claude: true,
           codex: true,
@@ -346,11 +350,33 @@ test("Agent send waits for presence and never leaves an offline request analyzin
       }),
     });
   });
+  let enqueued = 0;
+  await page.route("**/api/agent/enqueue", (route) => {
+    enqueued += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, jobId: "reconnected-run" }),
+    });
+  });
+  await page.route("**/api/agent/events**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ events: [{ type: "text", text: "The page is improved." }, { type: "done" }], cursor: 2 }),
+  }));
+  await page.route("**/api/workspace**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ files: [], entry: null, count: 0 }),
+  }));
   await page.goto("/");
   await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
   await page.locator("textarea").fill("Improve the page");
+  sending = true;
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText(/Hyzr is offline\. Reopen/i)).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText(/Waiting for.*My PC/i)).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText("The page is improved.")).toBeVisible({ timeout: 10_000 });
+  expect(enqueued).toBe(1);
   await expect(page.getByText(/Analyzing your request/i)).toHaveCount(0);
 });
 

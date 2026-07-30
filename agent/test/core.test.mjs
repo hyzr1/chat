@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -21,6 +22,13 @@ test("explicit provider model wins before prompt heuristics", () => {
   const tools = { claude: "claude", codex: "codex" };
   assert.equal(__test.engineFor({ model: "claude-sonnet", prompt: "fix tests" }, tools), "claude");
   assert.equal(__test.engineFor({ model: "gpt-5.6-sol", prompt: "write a poem" }, tools), "codex");
+});
+
+test("the bridge forwards commands without injecting preview restrictions", () => {
+  const prompt = "Run npm run dev on port 5000 and keep it running.";
+  const transcript = __test.transcript({ prompt, history: [] });
+  assert.equal(transcript, prompt);
+  assert.doesNotMatch(transcript, /Hyzr manages|do not start|persistent\/background/i);
 });
 
 test("relay credentials are never sent over remote plaintext HTTP", () => {
@@ -87,34 +95,34 @@ test("static projects run on a direct local preview server", async () => {
   }
 });
 
-test("launched framework preview servers are stopped with their listener process", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hyzr-framework-preview-"));
-  const workspace = path.join(root, "framework-chat");
+test("framework preview passively attaches to the project's declared server", async () => {
+  const projectServer = createServer((_request, response) => response.end("agent-owned preview"));
+  await new Promise((resolve, reject) => {
+    projectServer.once("error", reject);
+    projectServer.listen(0, "0.0.0.0", resolve);
+  });
+  const address = projectServer.address();
+  const declaredPort = typeof address === "object" && address ? address.port : 0;
+  assert.ok(declaredPort > 0);
+
+  const root = await mkdtemp(path.join(os.tmpdir(), "hyzr-declared-preview-"));
+  const workspace = path.join(root, "declared-port-chat");
   await mkdir(workspace);
   await writeFile(path.join(workspace, "package.json"), JSON.stringify({
     private: true,
-    scripts: { dev: "node server.js" },
+    scripts: { dev: `vite --host 0.0.0.0 --port ${declaredPort}` },
   }));
-  await writeFile(path.join(workspace, "server.js"), [
-    "const http = require('node:http');",
-    "const index = process.argv.indexOf('--port');",
-    "const port = Number(index >= 0 ? process.argv[index + 1] : process.env.PORT);",
-    "http.createServer((_request, response) => response.end('framework preview')).listen(port, '0.0.0.0');",
-  ].join("\n"));
-  const npm = process.platform === "win32" ? path.join(path.dirname(process.execPath), "npm.cmd") : "npm";
-  let result;
   try {
-    result = await __test.startPreviewServer({ workspaceRoot: root, tools: { npm } }, "framework-chat");
-    assert.equal(await (await fetch(result.localUrl)).text(), "framework preview");
+    const result = await __test.startPreviewServer({ workspaceRoot: root, tools: {} }, "declared-port-chat");
+    assert.equal(result.port, declaredPort);
+    assert.equal(result.localUrl, `http://localhost:${declaredPort}`);
+    assert.equal(result.attached, true);
+    assert.equal(await (await fetch(result.localUrl)).text(), "agent-owned preview");
+    __test.sweepPreviewServers(true);
+    assert.equal(await (await fetch(result.localUrl)).text(), "agent-owned preview");
   } finally {
     __test.sweepPreviewServers(true);
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    if (result) {
-      await assert.rejects(
-        fetch(result.localUrl, { signal: AbortSignal.timeout(750) }),
-        /fetch failed|aborted|timeout/i,
-      );
-    }
+    await new Promise((resolve) => projectServer.close(resolve));
     await rm(root, { recursive: true, force: true });
   }
 });
