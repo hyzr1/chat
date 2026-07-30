@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { workspaceFor } from "@/lib/local-runner";
+import { isHostedRuntime } from "@/lib/agent-protocol";
+import { callPairedAgent } from "@/lib/paired-agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,6 +58,23 @@ function findEntry(files: FileNode[]): string | null {
 }
 
 export async function GET(req: NextRequest) {
+  if (isHostedRuntime()) {
+    try {
+      const session = req.nextUrl.searchParams.get("session") || "";
+      const requestedFile = req.nextUrl.searchParams.get("file");
+      const data = await callPairedAgent(
+        req,
+        requestedFile ? "workspace.read" : "workspace.list",
+        requestedFile ? { workspaceId: session, path: requestedFile } : { workspaceId: session },
+      );
+      return NextResponse.json(data, { headers: { "Cache-Control": "no-store" } });
+    } catch (error: any) {
+      return NextResponse.json(
+        { error: error?.message || "Could not reach the paired workspace.", reason: error?.reason },
+        { status: Number(error?.status) || 500 },
+      );
+    }
+  }
   const workspace = workspaceFor(req.nextUrl.searchParams.get("session") ?? undefined);
   try {
     await fs.mkdir(workspace, { recursive: true });

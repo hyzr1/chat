@@ -6,6 +6,8 @@ import path from "path";
 // through local-runner also pulls in the agent CLI process runner and causes
 // Next's server tracer to conservatively include the whole application.
 import { workspaceFor } from "@/lib/workspace";
+import { isHostedRuntime } from "@/lib/agent-protocol";
+import { callPairedAgent } from "@/lib/paired-agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -124,6 +126,15 @@ export async function POST(req: NextRequest) {
     const { sessionId } = await req.json();
     if (!sessionId || typeof sessionId !== "string") {
       return NextResponse.json({ error: "Missing session id" }, { status: 400 });
+    }
+    if (isHostedRuntime()) {
+      const result = await callPairedAgent(req, "preview.start", { workspaceId: sessionId }, 40_000) as { port?: number; reused?: boolean };
+      return NextResponse.json({
+        url: `/preview/_dev/${encodeURIComponent(sessionId)}/`,
+        localPort: result.port,
+        proxied: true,
+        reused: result.reused,
+      });
     }
     const workspace = workspaceFor(sessionId);
     const hostname = publicHostname(req);

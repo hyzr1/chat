@@ -1,10 +1,47 @@
 {
   "name": "@hyzr/agent",
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "author": "Hyzr",
   "description": "Hyzr local agent — runs Agent tasks on your own machine's Claude and Codex.",
   "type": "module",
+  "main": "desktop/main.mjs",
   "bin": { "hyzr-agent": "index.mjs" },
+  "scripts": {
+    "dev": "electron .",
+    "test": "node --test",
+    "build": "electron-builder",
+    "build:dir": "electron-builder --dir"
+  },
   "engines": { "node": ">=18" },
-  "files": ["index.mjs"],
+  "files": ["index.mjs", "src/core.mjs"],
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "overrides": {
+    "brace-expansion": "^5.0.8",
+    "minimatch": "^10.2.6",
+    "glob": "^13.0.0",
+    "rimraf": "^6.1.2"
+  },
+  "build": {
+    "appId": "ai.hyzr.agent",
+    "productName": "Hyzr Agent",
+    "protocols": [{ "name": "Hyzr Pairing", "schemes": ["hyzr"] }],
+    "artifactName": "Hyzr-Agent-${version}-${os}-${arch}.${ext}",
+    "files": ["desktop/**/*", "src/**/*", "package.json"],
+    "directories": { "output": "dist" },
+    "icon": "desktop/icon.png",
+    "win": { "target": ["nsis"], "icon": "desktop/icon.png" },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": { "target": ["dmg"], "category": "public.app-category.developer-tools" },
+    "linux": { "target": ["AppImage", "deb"], "category": "Development" }
+  },
   "license": "MIT"
 }

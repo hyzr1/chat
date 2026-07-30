@@ -1,9 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { execFile } from "child_process";
 import { access, mkdir, stat } from "fs/promises";
 import { promisify } from "util";
 import os from "os";
 import { WORKSPACE_DIRECTORY } from "@/lib/product-paths";
+import { isHostedRuntime } from "@/lib/agent-protocol";
+import { pairedAgent } from "@/lib/paired-agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,24 +31,26 @@ async function detect(command: string, versionArgs = ["--version"]) {
 // True when the app is running on hosted/serverless infra (e.g. Vercel)
 // rather than on the user's own machine. In that case the server can't see
 // the user's local CLIs — they must run a local pairing agent instead.
-function isHosted() {
-  return (
-    process.env.VERCEL === "1" ||
-    process.env.HYZR_HOSTED === "1" ||
-    process.env.AWS_LAMBDA_FUNCTION_NAME != null ||
-    process.env.NEXT_RUNTIME === "edge"
-  );
-}
-
-export async function GET() {
-  if (isHosted()) {
+export async function GET(request: NextRequest) {
+  if (isHostedRuntime()) {
+    const paired = await pairedAgent(request);
     // Detection here would describe the serverless box, not the user. Report
     // hosted mode so the client shows the "download the local agent" flow.
     return NextResponse.json({
       hosted: true,
-      platform: process.platform,
-      agentConnected: false,
-      ready: false,
+      platform: paired?.agent.platform || "",
+      host: paired?.agent.host,
+      node: paired?.agent.node ? { available: true, version: paired.agent.node } : undefined,
+      git: paired ? { available: paired.agent.git, version: null } : undefined,
+      gh: paired ? { available: paired.agent.gh, version: null } : undefined,
+      claude: paired ? { available: paired.agent.claude, version: null } : undefined,
+      codex: paired ? { available: paired.agent.codex, version: null } : undefined,
+      workspace: paired?.agent.workspaceRoot
+        ? { path: paired.agent.workspaceRoot, exists: true, projects: 0 }
+        : undefined,
+      agentConnected: Boolean(paired?.online),
+      agent: paired?.agent || null,
+      ready: Boolean(paired?.online && (paired.agent.claude || paired.agent.codex)),
     }, { headers: { "Cache-Control": "no-store" } });
   }
 
@@ -78,7 +82,7 @@ export async function GET() {
 
 // Create the isolated projects root if it does not exist yet.
 export async function POST() {
-  if (isHosted()) return NextResponse.json({ ok: false, error: "Not available on hosted Hyzr — pair a local agent." }, { status: 400 });
+  if (isHostedRuntime()) return NextResponse.json({ ok: false, error: "Not available on hosted Hyzr — pair a local agent." }, { status: 400 });
   try {
     await mkdir(WORKSPACE_DIRECTORY, { recursive: true });
     return NextResponse.json({ ok: true, path: WORKSPACE_DIRECTORY });

@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { workspaceFor } from "@/lib/workspace";
+import { isHostedRuntime } from "@/lib/agent-protocol";
+import { callPairedAgent } from "@/lib/paired-agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,10 +35,47 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const parts = (await params).path ?? [];
+  const devProxy = parts[0] === "_dev" && parts.length >= 2;
   const scoped = parts[0] === "_s" && parts.length >= 3;
-  const sessionId = scoped ? parts[1] : req.nextUrl.searchParams.get("session") ?? undefined;
-  const rel = (scoped ? parts.slice(2) : parts).join("/") || "index.html";
+  const sessionId = devProxy || scoped ? parts[1] : req.nextUrl.searchParams.get("session") ?? undefined;
+  const rel = (devProxy ? parts.slice(2) : scoped ? parts.slice(2) : parts).join("/") || (devProxy ? "" : "index.html");
   if (rel.includes("..")) return new Response("bad path", { status: 400 });
+  if (isHostedRuntime()) {
+    try {
+      if (devProxy) {
+        const query = req.nextUrl.search || "";
+        const result = await callPairedAgent(req, "preview.http", { workspaceId: sessionId, path: `/${rel}${query}` }, 25_000) as {
+          status: number; contentType: string; location?: string | null; body: string;
+        };
+        let body: BodyInit = Buffer.from(result.body, "base64");
+        const contentType = result.contentType || "application/octet-stream";
+        if (/^(text\/html|text\/css|(?:application|text)\/javascript)/i.test(contentType)) {
+          const scope = `/preview/_dev/${encodeURIComponent(sessionId || "")}/`;
+          let text = Buffer.from(result.body, "base64").toString("utf8");
+          if (/^text\/html/i.test(contentType)) {
+            const baseTag = `<base href="${scope}">`;
+            text = /<head[^>]*>/i.test(text) ? text.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`) : `${baseTag}${text}`;
+            text = text.replace(/((?:src|href|poster|action)\s*=\s*["'])\/(?!\/|preview\/)/gi, `$1${scope}`);
+          } else {
+            text = text
+              .replace(/(from\s*["'])\/(?!\/)/g, `$1${scope}`)
+              .replace(/(import\s*["'])\/(?!\/)/g, `$1${scope}`)
+              .replace(/url\(\s*(["']?)\/(?!\/|preview\/)/gi, `url($1${scope}`);
+          }
+          body = text;
+        }
+        const headers: Record<string, string> = { "Content-Type": contentType, "Cache-Control": "no-store" };
+        if (result.location) headers.Location = result.location.startsWith("/") ? `/preview/_dev/${encodeURIComponent(sessionId || "")}${result.location}` : result.location;
+        return new Response(body, { status: result.status, headers });
+      }
+      const data = await callPairedAgent(req, "workspace.asset", { workspaceId: sessionId, path: rel }) as { body: string };
+      const binary = Buffer.from(data.body, "base64");
+      const ext = path.extname(rel).toLowerCase();
+      return new Response(binary, { headers: { "Content-Type": TYPES[ext] ?? "application/octet-stream", "Cache-Control": "no-store" } });
+    } catch (error: any) {
+      return new Response(error?.message || "Not found", { status: Number(error?.status) || 404 });
+    }
+  }
   const workspace = workspaceFor(sessionId);
   const full = path.join(/* turbopackIgnore: true */ workspace, rel);
   if (!full.startsWith(workspace)) return new Response("bad path", { status: 400 });

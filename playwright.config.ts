@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const testPort = process.env.HYZR_CHAT_TEST_PORT ?? process.env.VMX_TEST_PORT ?? "4173";
+const testPort = process.env.HYZR_CHAT_TEST_PORT ?? process.env.VMX_TEST_PORT ?? "48173";
 const testBaseUrl = `http://127.0.0.1:${testPort}`;
 
 export default defineConfig({
@@ -9,9 +9,9 @@ export default defineConfig({
   use: { baseURL: testBaseUrl, trace: "retain-on-failure" },
   reporter: "line",
   webServer: {
-    command: `npm run dev -- --hostname 127.0.0.1 --port ${testPort}`,
+    command: `npm run build && npm run start -- --hostname 127.0.0.1 --port ${testPort}`,
     url: `${testBaseUrl}/api/health`,
     reuseExistingServer: true,
-    timeout: 30_000,
+    timeout: 120_000,
   },
 });

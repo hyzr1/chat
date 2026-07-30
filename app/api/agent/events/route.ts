@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { queueRange } from "@/lib/relay-store";
+import { ownsAgentJob } from "@/lib/paired-agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export async function GET(request: NextRequest) {
   const jobId = url.searchParams.get("job");
   const cursor = Number(url.searchParams.get("cursor") || 0);
   if (!jobId) return NextResponse.json({ error: "Missing job." }, { status: 400 });
+  if (!await ownsAgentJob(request, jobId)) return NextResponse.json({ error: "Run not found." }, { status: 404 });
   const all = await queueRange<{ type: string; text?: string; at: number }>(`results:${jobId}`);
   return NextResponse.json({ events: all.slice(cursor), cursor: all.length }, { headers: { "Cache-Control": "no-store" } });
 }

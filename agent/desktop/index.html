@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+    <title>Hyzr Agent</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="./icon.svg" alt="" />
+        <div><strong>Hyzr Agent</strong><span>Your computer, securely available in Hyzr Chat.</span></div>
+        <i id="status-dot"></i>
+      </header>
+
+      <section class="hero">
+        <span class="eyebrow">LOCAL BRIDGE</span>
+        <h1>Pair this computer</h1>
+        <p>Enter the code shown on the Hyzr website. Projects stay on this computer and Claude Code, Codex, Git, and GitHub CLI use your existing sign-ins.</p>
+      </section>
+
+      <form id="pair-form">
+        <label>Pairing code<input id="code" maxlength="8" spellcheck="false" autocomplete="one-time-code" placeholder="ABC123" required /></label>
+        <label>Hyzr website<input id="relay" type="url" required /></label>
+        <label>Projects folder<span class="folder-row"><input id="workspace" required /><button id="browse" type="button">Choose</button></span></label>
+        <fieldset>
+          <legend>Filesystem access</legend>
+          <label class="choice"><input type="radio" name="permission" value="workspace" checked /><span><strong>Projects folder only</strong><small>Recommended. Models can edit and run commands inside each isolated project.</small></span></label>
+          <label class="choice"><input type="radio" name="permission" value="full-access" /><span><strong>Full filesystem</strong><small>Matches an unrestricted local agent. Only enable this on a computer and account you trust.</small></span></label>
+        </fieldset>
+        <label class="check"><input id="startup" type="checkbox" checked /><span>Start Hyzr Agent when I sign in</span></label>
+        <button class="primary" id="pair" type="submit">Pair computer</button>
+      </form>
+
+      <section id="connected" hidden>
+        <div class="connected-head"><span><i></i><strong id="status-text">Paired and listening</strong></span><button id="disconnect">Disconnect</button></div>
+        <div id="tools" class="tools"></div>
+        <button class="folder-button" id="open-folder">Open projects folder</button>
+        <p class="minimize-note">You can close this window. Hyzr Agent stays available in the background.</p>
+      </section>
+
+      <footer><span id="version"></span><span>Outbound connection only · no inbound ports</span></footer>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
+

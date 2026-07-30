@@ -595,21 +595,21 @@ export default function Home() {
   const [productPrefs, setProductPrefs] = useState<ProductPrefs>(DEFAULT_PRODUCT_PREFS);
   const [view, setView] = useState<View>("chat");
   const [workMode, setWorkMode] = useState<WorkMode>("chat");
-  // Guests get the free search-only Chat. Signing in unlocks Agent, API keys,
-  // pairing, history, and settings. Mock auth for now — a real provider slots
-  // into signIn()/signOut() without touching the gating.
+  // Guests get the free search-only Chat. Server-issued HttpOnly sessions
+  // unlock paired computers, synchronized history, API keys, and settings.
   const [account, setAccount] = useState<{ name: string; email: string } | null>(null);
   const [showLogin, setShowLogin] = useState(false);
+  const [loginError, setLoginError] = useState("");
   const [incognito, setIncognito] = useState(false);
   const [showPair, setShowPair] = useState(false);
   const [pairLoading, setPairLoading] = useState(false);
   const [agentPaired, setAgentPaired] = useState(false);
   const [pairCode, setPairCode] = useState("");
   const [hosted, setHosted] = useState(false);
-  const [agentInfo, setAgentInfo] = useState<{ host: string; engine: string; claude: boolean; codex: boolean; git: boolean; node: string } | null>(null);
+  const [agentInfo, setAgentInfo] = useState<{ host: string; engine: string; claude: boolean; codex: boolean; git: boolean; gh?: boolean; node: string; workspaceRoot?: string; permissionMode?: string; protocol?: number } | null>(null);
   const pairPollRef = useRef<number | null>(null);
   type Tool = { available: boolean; version: string | null };
-  const [pairInfo, setPairInfo] = useState<{ hosted?: boolean; platform: string; host?: string; node?: Tool; git?: Tool; claude?: Tool; codex?: Tool; workspace?: { path: string; exists: boolean; projects: number }; ready: boolean } | null>(null);
+  const [pairInfo, setPairInfo] = useState<{ hosted?: boolean; platform: string; host?: string; node?: Tool; git?: Tool; gh?: Tool; claude?: Tool; codex?: Tool; workspace?: { path: string; exists: boolean; projects: number }; agentConnected?: boolean; agent?: typeof agentInfo; ready: boolean } | null>(null);
   const signedIn = account !== null;
   const [toast, setToast] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -768,8 +768,11 @@ export default function Home() {
         const k = localStorage.getItem(KEYS_STORAGE) || localStorage.getItem(LEGACY_KEYS_STORAGE);
         if (k) setKeys({ anthropic: "", openai: "", linear: "", ...JSON.parse(k) });
         try {
-          const savedAccount = localStorage.getItem("hyzr.chat.account");
-          if (savedAccount) setAccount(JSON.parse(savedAccount));
+          const authResponse = await fetch("/api/auth/me", { cache: "no-store" });
+          if (authResponse.ok) {
+            const authPayload = await authResponse.json();
+            if (authPayload.user) setAccount({ name: authPayload.user.name, email: authPayload.user.email });
+          }
         } catch {}
         const legacyRaw = localStorage.getItem(SESSIONS_KEY) || localStorage.getItem(LEGACY_SESSIONS_KEY);
         const legacy: Session[] = legacyRaw ? JSON.parse(legacyRaw) : [];
@@ -1127,7 +1130,12 @@ export default function Home() {
         if (!info) return;
         setPairInfo(info);
         setHosted(Boolean(info.hosted));
-        if (info.hosted && !agentPaired) startHostedPairing();
+        if (info.hosted && info.agentConnected && info.agent) {
+          setAgentPaired(true);
+          setAgentInfo(info.agent);
+        } else if (info.hosted && !agentPaired) {
+          startHostedPairing();
+        }
       })
       .catch(() => {})
       .finally(() => setPairLoading(false));
@@ -1135,17 +1143,28 @@ export default function Home() {
   function createWorkspaceRoot() {
     fetch("/api/setup", { method: "POST" }).then(() => openPair()).catch(() => {});
   }
-  function signIn(provider: string, email?: string) {
-    const nextEmail = email?.trim() || `${provider.toLowerCase()}@hyzr.ai`;
-    const next = { name: nextEmail.split("@")[0] || "You", email: nextEmail };
-    setAccount(next);
+  async function signIn(action: "login" | "signup", email: string, password: string) {
+    setLoginError("");
+    const response = await fetch(`/api/auth/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setLoginError(payload.error || "Could not sign in.");
+      return;
+    }
+    setAccount({ name: payload.user.name, email: payload.user.email });
     setShowLogin(false);
-    try { localStorage.setItem("hyzr.chat.account", JSON.stringify(next)); } catch {}
+    setToast(action === "signup" ? "Account created" : "Signed in");
   }
-  function signOut() {
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setAccount(null);
+    setAgentPaired(false);
+    setAgentInfo(null);
     setWorkMode("chat");
-    try { localStorage.removeItem("hyzr.chat.account"); } catch {}
   }
   // Chat = fast conversation/search (routing only, no workspace). Code = the
   // full building surface: projects, tasks, proof, work intake, the pairer.
@@ -1391,11 +1410,34 @@ export default function Home() {
         return;
       }
       try {
-        const enq = await fetch("/api/agent/enqueue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: pairCode, job: { id: activeRunId, prompt: text, model: override !== "auto" ? override : null } }), signal: ac.signal });
+        const enq = await fetch("/api/agent/enqueue", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code: pairCode,
+            job: {
+              id: activeRunId,
+              runId: activeRunId,
+              conversationId: sid,
+              workspaceId: sid,
+              projectId: space?.name || undefined,
+              prompt: text,
+              history: requestHistory.slice(0, -1),
+              model: override !== "auto" ? override : null,
+              effort,
+              plan: planOn,
+            },
+          }),
+          signal: ac.signal,
+        });
         const enqJson = await enq.json().catch(() => ({}));
         if (!enq.ok) {
           applyRelay(enqJson.error || "Could not reach your paired agent.", false);
-          if (enqJson.reason === "offline" || enqJson.reason === "unpaired") { setAgentPaired(false); try { localStorage.removeItem("hyzr.chat.agentCode"); } catch {} }
+          if (["offline", "unpaired", "upgrade_required"].includes(enqJson.reason)) {
+            setAgentPaired(false);
+            try { localStorage.removeItem("hyzr.chat.agentCode"); } catch {}
+            if (enqJson.reason === "upgrade_required") openPair();
+          }
           setBusy(false); busyRef.current = false;
           return;
         }
@@ -2439,15 +2481,20 @@ export default function Home() {
             <button className="login-close" onClick={() => setShowLogin(false)} aria-label="Close"><IconX size={16} /></button>
             <span className="login-mark"><HyzrMark size={30} /></span>
             <h2>Log in or sign up</h2>
-            <p>Save your history, use API keys, and pair your local environment for Agent mode.</p>
-            <button className="login-provider google" onClick={() => signIn("Google")}>Continue with Google</button>
-            <button className="login-provider apple" onClick={() => signIn("Apple")}>Continue with Apple</button>
-            <div className="login-divider"><span>or</span></div>
-            <form className="login-email" onSubmit={(e) => { e.preventDefault(); const email = (new FormData(e.currentTarget).get("email") as string) || ""; if (email.trim()) signIn("email", email); }}>
+            <p>Your account links shared chat history, phones, and paired computers.</p>
+            <form className="login-email" onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const action = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value === "signup" ? "signup" : "login";
+              void signIn(action, String(form.get("email") || ""), String(form.get("password") || ""));
+            }}>
               <input name="email" type="email" placeholder="Enter your email" autoComplete="email" required />
-              <button type="submit">Continue with email</button>
+              <input name="password" type="password" placeholder="Password (10+ characters)" autoComplete="current-password" minLength={10} required />
+              {loginError && <span className="pair-error">{loginError}</span>}
+              <button type="submit" value="login">Sign in</button>
+              <button type="submit" value="signup" className="login-provider">Create account</button>
             </form>
-            <small>By continuing you agree to the Terms and Privacy Policy.</small>
+            <small>Passwords are hashed with scrypt. The browser receives only an HttpOnly session cookie.</small>
           </div>
         </div>
       )}
@@ -2456,7 +2503,7 @@ export default function Home() {
         const p = pairInfo;
         const connected = Boolean(p && !p.hosted && (p.claude?.available || p.codex?.available));
         const origin = typeof window !== "undefined" ? window.location.origin : "";
-        const runCmd = `node hyzr-agent.mjs --url=${origin} --code=${pairCode || "······"}`;
+        const pairLink = pairCode ? `hyzr://pair?relay=${encodeURIComponent(origin)}&code=${encodeURIComponent(pairCode)}` : "";
         const row = (icon: React.ReactNode, label: string, tool: { available: boolean; version: string | null } | null, help: React.ReactNode) => (
           <div className={`pair-tool ${tool?.available ? "on" : "off"}`}>
             <span className="pt-icon">{icon}</span>
@@ -2493,20 +2540,26 @@ export default function Home() {
                   {row(<IconSparkles size={16} />, "Claude", agentInfo ? { available: agentInfo.claude, version: agentInfo.engine === "claude" ? "In use" : null } : null, <>Not connected on this machine.</>)}
                   {row(<IconCpu size={16} />, "Codex", agentInfo ? { available: agentInfo.codex, version: agentInfo.engine === "codex" ? "In use" : null } : null, <>Not connected on this machine.</>)}
                   {row(<IconGithub size={16} />, "Git", agentInfo ? { available: agentInfo.git, version: null } : null, <>Not detected.</>)}
+                  {row(<IconGithub size={16} />, "GitHub CLI", agentInfo ? { available: Boolean(agentInfo.gh), version: null } : null, <>Install and sign in to <code>gh</code> to browse repositories from the deployed site.</>)}
                 </div>
               ) : (
               <div className="pair-steps">
                 <div className="pair-step"><span className="pair-step-n">1</span><div>
-                  <b>Download the agent</b>
-                  <span>One file. It detects your Claude &amp; Codex and runs tasks on your machine. Needs <a href="https://nodejs.org" target="_blank" rel="noopener">Node</a>.</span>
-                  <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, textDecoration: "none" }} href="/hyzr-agent.mjs" download="hyzr-agent.mjs"><IconWindows size={13} /> Download hyzr-agent.mjs</a>
+                  <b>Install Hyzr Agent</b>
+                  <span>Use the desktop installer. It reconnects automatically, keeps projects isolated, and uses your existing Claude, Codex, Git, and GitHub CLI sign-ins.</span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 8 }}>
+                    <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }} href="/api/agent/download?platform=windows"><IconWindows size={13} /> Windows installer</a>
+                    <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }} href="/api/agent/download?platform=mac">macOS</a>
+                    <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }} href="/api/agent/download?platform=linux">Linux</a>
+                  </div>
                 </div></div>
                 <div className="pair-step"><span className="pair-step-n">2</span><div>
-                  <b>Run it with your code</b>
-                  <span>In a terminal, from where it downloaded:</span>
+                  <b>Open it and enter this code</b>
+                  <span>The code expires after 15 minutes and can be claimed only once.</span>
+                  {pairLink && <a className="pair-primary" style={{ display: "inline-flex", justifyContent: "center", marginTop: 8, textDecoration: "none" }} href={pairLink}>Open Hyzr Agent</a>}
                   <div className="pair-field" style={{ marginTop: 8 }}>
-                    <code>{runCmd}</code>
-                    <button onClick={() => { navigator.clipboard?.writeText(runCmd); setToast("Command copied"); }}>Copy</button>
+                    <code style={{ fontSize: 18, letterSpacing: "0.16em" }}>{pairCode || "······"}</code>
+                    <button onClick={() => { navigator.clipboard?.writeText(pairCode); setToast("Pairing code copied"); }}>Copy</button>
                   </div>
                 </div></div>
                 <div className="pair-step"><span className="pair-step-n">3</span><div>
@@ -2517,7 +2570,7 @@ export default function Home() {
               )}
               <div className="pair-perms">
                 <IconShield size={14} />
-                <span>The agent runs on your computer. Hyzr never receives your files or keys — only the task and its result.</span>
+                <span>The agent makes outbound connections only. Provider credentials stay on your computer; project files cross the bridge only for visible file, Git, or preview requests.</span>
               </div>
               <div className="pair-actions">
                 {agentPaired

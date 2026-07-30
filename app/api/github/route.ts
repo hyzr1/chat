@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { execFile } from "child_process";
+import { isHostedRuntime, type AgentRpcMethod } from "@/lib/agent-protocol";
+import { callPairedAgent } from "@/lib/paired-agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +43,26 @@ export async function GET(req: NextRequest) {
   const action = sp.get("action");
 
   try {
+    if (isHostedRuntime()) {
+      const methods: Record<string, AgentRpcMethod> = {
+        status: "github.status",
+        repos: "github.repos",
+        tree: "github.tree",
+        file: "github.file",
+        issues: "github.issues",
+        issue: "github.issue",
+      };
+      const method = methods[action || ""];
+      if (!method) return NextResponse.json({ error: "unknown action" }, { status: 400 });
+      const data = await callPairedAgent(req, method, {
+        repo: sp.get("repo") || "",
+        path: sp.get("path") || "",
+        state: sp.get("state") || "open",
+        number: sp.get("number") || "",
+      });
+      return NextResponse.json(data, { headers: { "Cache-Control": "no-store" } });
+    }
+
     if (action === "status") {
       const user = JSON.parse(await gh(["api", "user"]));
       return NextResponse.json({ connected: true, login: user.login });
@@ -110,8 +132,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unknown action" }, { status: 400 });
   } catch (e: any) {
     return NextResponse.json(
-      { error: e?.message ?? "gh command failed", connected: false },
-      { status: 500 },
+      { error: e?.message ?? "gh command failed", connected: false, reason: e?.reason },
+      { status: Number(e?.status) || 500 },
     );
   }
 }

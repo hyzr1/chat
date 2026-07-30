@@ -99,8 +99,10 @@ export async function queueRange<T = unknown>(key: string): Promise<T[]> {
 
 export function newCode(length = 6) {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous 0/O/1/I
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
   let out = "";
-  for (let i = 0; i < length; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  for (let i = 0; i < length; i++) out += alphabet[bytes[i] & 31];
   return out;
 }
 

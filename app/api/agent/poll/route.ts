@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 // The local agent long-polls for the next job. Serverless-friendly: a short
 // bounded wait, then return null so the agent immediately re-polls.
 export async function GET(request: NextRequest) {
-  const token = new URL(request.url).searchParams.get("token");
+  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || new URL(request.url).searchParams.get("token");
   if (!token) return NextResponse.json({ error: "Missing token." }, { status: 400 });
 
   const record = await kvGet<{ token: string; agent: unknown }>(`agent:${token}`);

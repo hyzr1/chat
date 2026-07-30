@@ -1,18 +1,24 @@
 import { expect, test } from "@playwright/test";
 
+async function createTestAccount(page: import("@playwright/test").Page) {
+  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const response = await page.request.post("/api/auth/signup", {
+    data: { email: `browser-${nonce}@example.test`, password: `hyzr-browser-${nonce}` },
+  });
+  expect(response.ok()).toBeTruthy();
+}
+
 for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "mobile", width: 390, height: 844 }]) {
   test(`${viewport.name} usage UI stays inside the viewport`, async ({ page }) => {
     await page.setViewportSize(viewport);
+    await createTestAccount(page);
     await page.goto("/");
     await expect(page.locator(".app")).toBeVisible();
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(1);
 
-    const settingsButton = viewport.name === "desktop"
-      ? page.locator("button:visible", { hasText: "Settings" }).first()
-      : page.locator('button[title="Settings"]:visible');
-    await settingsButton.click();
+    await page.getByRole("button", { name: "Settings" }).click();
     await page.getByRole("button", { name: /Usage & limits/i }).click();
     await expect(page.getByText("Measured execution efficiency")).toBeVisible();
     await expect(page.getByText("No invented savings")).toBeVisible();
@@ -30,8 +36,11 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 900 }, { name: "
 
 test("mobile primary navigation remains usable without horizontal overflow", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await createTestAccount(page);
   await page.goto("/");
   await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("tab", { name: "Agent" }).click();
   for (const destination of ["Tasks", "Proof", "Projects", "Work intake", "Library"]) {
     await page.getByRole("button", { name: "Open navigation" }).click();
     const accessibleName = destination === "Tasks" ? /^Tasks(?: \d+)?$/ : new RegExp(`^${destination}$`);

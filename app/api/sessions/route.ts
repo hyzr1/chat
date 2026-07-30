@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { STATE_DIRECTORY } from "@/lib/product-paths";
+import { authUser } from "@/lib/auth";
+import { isHostedRuntime } from "@/lib/agent-protocol";
+import { kvGet, kvSet } from "@/lib/relay-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,9 +49,12 @@ function sanitizeSession(session: SharedSession): SharedSession {
   return { ...session, messages };
 }
 
-async function readState(): Promise<SharedState> {
+async function readState(scope = "local"): Promise<SharedState> {
   try {
-    const parsed = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    const parsed = isHostedRuntime()
+      ? await kvGet<SharedState>(`sessions:${scope}`)
+      : JSON.parse(await fs.readFile(stateFile, "utf8"));
+    if (!parsed) return { sessions: [], tombstones: {}, revision: 0 };
     return {
       sessions: Array.isArray(parsed.sessions) ? parsed.sessions.map(sanitizeSession) : [],
       tombstones: parsed.tombstones && typeof parsed.tombstones === "object" ? parsed.tombstones : {},
@@ -59,7 +65,11 @@ async function readState(): Promise<SharedState> {
   }
 }
 
-async function writeState(state: SharedState) {
+async function writeState(state: SharedState, scope = "local") {
+  if (isHostedRuntime()) {
+    await kvSet(`sessions:${scope}`, state);
+    return;
+  }
   await fs.mkdir(directory, { recursive: true });
   const temporary = `${stateFile}.${process.pid}.tmp`;
   await fs.writeFile(temporary, JSON.stringify(state), "utf8");
@@ -71,19 +81,24 @@ function timestamp(session: SharedSession) {
 }
 
 export async function GET(req: NextRequest) {
-  const state = await readState();
+  const user = await authUser(req);
+  if (isHostedRuntime() && !user) return NextResponse.json({ error: "Sign in to synchronize conversations." }, { status: 401 });
+  const state = await readState(user?.id || "local");
   const since = Number(req.nextUrl.searchParams.get("since") ?? -1);
   if (since >= 0 && since === state.revision) return new NextResponse(null, { status: 204, headers: { "Cache-Control": "no-store" } });
   return NextResponse.json(state, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(req: NextRequest) {
+  const user = await authUser(req);
+  if (isHostedRuntime() && !user) return NextResponse.json({ error: "Sign in to synchronize conversations." }, { status: 401 });
+  const scope = user?.id || "local";
   const body = await req.json();
   const incoming = Array.isArray(body.sessions) ? body.sessions.filter((session: any) => session && typeof session.id === "string") as SharedSession[] : [];
   const deleted = body.tombstones && typeof body.tombstones === "object" ? body.tombstones as Record<string, number> : {};
 
   const operation = writeQueue.then(async () => {
-    const state = await readState();
+    const state = await readState(scope);
     const tombstones = { ...state.tombstones };
     for (const [id, deletedAt] of Object.entries(deleted)) {
       const time = Number(deletedAt) || Date.now();
@@ -105,7 +120,7 @@ export async function POST(req: NextRequest) {
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
     for (const [id, deletedAt] of Object.entries(tombstones)) if (deletedAt < cutoff) delete tombstones[id];
     const next: SharedState = { sessions: [...sessions.values()].sort((a, b) => timestamp(b) - timestamp(a)), tombstones, revision: state.revision + 1 };
-    await writeState(next);
+    await writeState(next, scope);
     return next;
   });
   writeQueue = operation.catch(() => {});
