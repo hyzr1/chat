@@ -1,0 +1,26 @@
+#!/bin/sh
+set -u
+
+HYZR_URL="${HYZR_URL:-https://chat-beta-weld.vercel.app}"
+HYZR_DIR="${HOME}/.hyzr/agent"
+HYZR_RUNTIME="${HYZR_DIR}/hyzr-agent.mjs"
+HYZR_TEMP="${HYZR_DIR}/hyzr-agent.tmp"
+
+if ! command -v node >/dev/null 2>&1; then
+  printf '\nHyzr needs Node.js 18 or newer.\nInstall it from https://nodejs.org and run this file again.\n\n'
+  exit 1
+fi
+
+mkdir -p "$HYZR_DIR"
+if command -v curl >/dev/null 2>&1; then
+  curl -fsSL "${HYZR_URL}/downloads/hyzr-agent.mjs" -o "$HYZR_TEMP" && mv "$HYZR_TEMP" "$HYZR_RUNTIME"
+elif command -v wget >/dev/null 2>&1; then
+  wget -q "${HYZR_URL}/downloads/hyzr-agent.mjs" -O "$HYZR_TEMP" && mv "$HYZR_TEMP" "$HYZR_RUNTIME"
+fi
+
+if [ ! -f "$HYZR_RUNTIME" ]; then
+  printf '\nHyzr could not download its tiny runtime. Check your connection and try again.\n\n'
+  exit 1
+fi
+
+exec node "$HYZR_RUNTIME" "--url=${HYZR_URL}"

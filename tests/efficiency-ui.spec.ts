@@ -86,6 +86,38 @@ test("mobile pairing gate is usable and contained", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
+test("hosted computer setup is a compact terminal download and code", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createTestAccount(page);
+  await page.route("**/api/setup", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ hosted: true, platform: "", agentConnected: false, agent: null, ready: false }),
+  }));
+  await page.route("**/api/agent/code", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ code: "ABC123" }),
+  }));
+  await page.route("**/api/agent/status**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ status: "waiting" }),
+  }));
+  await page.goto("/");
+  await page.locator("button.top-download").click();
+  await expect(page.getByRole("heading", { name: "Connect your computer" })).toBeVisible();
+  const download = page.locator(".pair-download");
+  await expect(download).toContainText(/Download hyzr/);
+  await expect(download).toHaveAttribute("href", /\/api\/agent\/download\?platform=/);
+  await expect(page.locator(".pair-code > div code")).toHaveText(/[A-Z0-9]{6}/);
+  await expect(page.getByText("Tiny terminal launcher")).toBeVisible();
+  const box = await page.locator(".pair-sheet").boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeLessThanOrEqual(390);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
 test("evaluation lab runs free audits and gates paid comparisons", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/?view=proof");

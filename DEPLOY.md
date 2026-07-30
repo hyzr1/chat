@@ -2,11 +2,10 @@
 
 Hyzr has two execution boundaries:
 
-- Local development runs the Next.js server and the coding CLIs on the same
-  trusted computer.
+- Local development runs the Next.js server and coding CLIs on one trusted computer.
 - Vercel hosts identity, synchronized chat state, orchestration, and the web UI.
-  The installable Hyzr Agent creates an outbound authenticated connection from
-  the user's computer for CLI, Git, filesystem, and preview work.
+  The tiny Hyzr terminal launcher creates an outbound authenticated connection
+  from the user's computer for CLI, Git, filesystem, and preview work.
 
 Vercel never executes a command against the user's filesystem.
 
@@ -27,49 +26,41 @@ The in-memory fallback is only for a single local development process.
 Do not expose a hosted deployment without persistent Redis. Vercel functions
 are stateless and their writable filesystem is temporary.
 
-## Pairing a computer
+## Connecting a computer
 
-On the hosted site, a signed-in user opens **Download → Pair your environment**
-and receives a one-use six-character code:
+On the hosted site, a signed-in user opens **Connect your computer** and receives
+a one-use six-character code:
 
-1. Download the Windows, macOS, or Linux installer.
-2. Open Hyzr Agent and enter the pairing code.
-3. Choose the projects directory.
-4. Confirm **Full developer access** (the installer default) for normal local
-   commands, Git metadata, and filesystem context. Users who prefer a stricter
-   boundary can select **Projects folder only**; Codex's workspace-write sandbox
-   intentionally protects `.git` metadata in that mode.
+1. Download `hyzr.cmd` on Windows or `hyzr` on macOS/Linux.
+2. Open it and enter the code.
+3. Leave the terminal open while using the web app.
 
-The agent starts on login, reconnects after sleep or network changes, and
-detects Claude Code, Codex, Git, GitHub CLI, and npm independently. It stores
-native Claude/Codex session IDs per web conversation and pins every conversation
-to one stable workspace directory.
+The launcher is under 1 KB. It downloads the current relay runtime (roughly tens
+of kilobytes) into `~/.hyzr/agent`, creates `~/Hyzr`, and reconnects with its
+saved pairing on later launches. No Electron app, installer, shortcut, protocol
+handler, or background tray process is involved.
 
-The old downloadable `hyzr-agent.mjs` protocol is retired and rejected. It
-created a fresh folder on every turn, could not provide native conversation
-continuity, and had no usable approval surface.
+The relay detects Claude Code, Codex, Git, GitHub CLI, and npm independently. It
+stores native Claude/Codex session IDs per web conversation and pins every
+conversation to one stable workspace directory.
 
-## Building installers
-
-Installer source lives in `agent/`.
+## Building the terminal downloads
 
 ```powershell
 cd agent
 npm ci
 npm test
-npm run build -- --win
+npm run build
 ```
 
-Tagging `agent-v*` runs `.github/workflows/agent-release.yml` and attaches the
-Windows `.exe`, macOS `.dmg`, Linux `.AppImage`, and Debian package to a GitHub
-release. The website installer buttons link to the latest release.
+`scripts/build-agent-cli.mjs` creates:
 
-For public distribution, configure code-signing secrets before tagging:
+- `public/downloads/hyzr.cmd`
+- `public/downloads/hyzr`
+- `public/downloads/hyzr-agent.mjs`
 
-- Windows Authenticode: `CSC_LINK`, `CSC_KEY_PASSWORD`
-- Apple Developer ID and notarization credentials supported by electron-builder
-
-Unsigned development installers work but can trigger operating-system warnings.
+Tagging `agent-v*` runs `.github/workflows/agent-release.yml`, tests the relay,
+and attaches the same three lightweight files to a GitHub release.
 
 ## Hosted local-tool protocol
 
@@ -81,8 +72,8 @@ The v2 bridge supports two job classes:
   file viewing, and proxied local previews.
 
 There is deliberately no arbitrary remote-shell RPC method. Coding commands run
-only inside Claude Code or Codex under the permission mode the user selected.
-Result reads are account/device scoped and job ownership is verified.
+inside Claude Code or Codex. Result reads are account/device scoped and job
+ownership is verified.
 
 Main relay endpoints:
 
@@ -101,10 +92,10 @@ in a browser URL.
 
 ## Local previews through Vercel
 
-`POST /api/preview-server` asks the paired agent to start the project's `dev` or
+`POST /api/preview-server` asks the paired relay to start the project's `dev` or
 `start` script locally. Browser requests under `/preview/_dev/<conversation>/`
 are relayed to the local loopback server over the existing outbound bridge.
 This requires no inbound port, router change, or public development server.
 
-The proxy currently supports HTTP assets and page refreshes. WebSocket HMR is
-not tunneled; the user refreshes the preview after a change.
+The proxy supports HTTP assets and page refreshes. WebSocket HMR is not
+tunneled; the user refreshes the preview after a change.

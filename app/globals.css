@@ -4681,15 +4681,37 @@ select {
 
 /* ---------------- Pair / environment setup sheet ---------------- */
 .pair-overlay { align-items: center; justify-content: center; background: rgba(0,0,0,0.42); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
-.pair-sheet { position: relative; width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; padding: 26px 26px 22px; border: 1px solid var(--border-strong); border-radius: 20px; background: var(--panel); box-shadow: 0 40px 90px -24px rgba(0,0,0,0.45); animation: login-rise 0.28s cubic-bezier(0.2,0.7,0.2,1) both; }
-.pair-sheet-head { display: flex; align-items: flex-start; gap: 13px; margin-bottom: 16px; }
-.pair-sheet-mark { width: 40px; height: 40px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 11px; background: var(--bg); color: var(--text); }
-.pair-sheet-head h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
-.pair-sheet-head p { margin: 4px 0 0; color: var(--text-faint); font-size: 12.5px; line-height: 1.5; }
-.pair-status { display: flex; align-items: center; gap: 9px; padding: 10px 13px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel-2); font-size: 12.5px; color: var(--text-soft); }
+.pair-sheet { position: relative; width: 100%; max-width: 420px; max-height: 92vh; overflow-y: auto; padding: 22px; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--panel); box-shadow: 0 28px 70px -24px rgba(0,0,0,0.42); animation: login-rise 0.22s cubic-bezier(0.2,0.7,0.2,1) both; }
+.pair-sheet-head { display: flex; align-items: center; gap: 12px; margin-bottom: 15px; padding-right: 28px; }
+.pair-sheet-mark { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); }
+.pair-sheet-head h2 { margin: 0; font-size: 18px; font-weight: 620; letter-spacing: -0.025em; }
+.pair-sheet-head p { margin: 3px 0 0; color: var(--text-faint); font-size: 12px; line-height: 1.4; }
+.pair-status { display: flex; align-items: center; gap: 9px; padding: 9px 11px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); font-size: 12px; color: var(--text-soft); }
 .pair-status .ps-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex: 0 0 auto; }
 .pair-status.ready .ps-dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
 .pair-status.pending .ps-dot { background: var(--warn); }
+.pair-cli { display: grid; gap: 10px; }
+.pair-download { min-height: 52px; display: flex; align-items: center; gap: 11px; padding: 0 14px; border-radius: 10px; background: var(--text); color: var(--bg); text-decoration: none; }
+.pair-download > span { min-width: 0; flex: 1; display: grid; gap: 1px; font-size: 13px; font-weight: 620; }
+.pair-download small { color: color-mix(in srgb, var(--bg) 68%, transparent); font-size: 10.5px; font-weight: 450; }
+.pair-platforms { display: flex; justify-content: center; gap: 14px; min-height: 18px; }
+.pair-platforms a { color: var(--text-faint); font-size: 11px; text-decoration: none; }
+.pair-platforms a:hover { color: var(--text); text-decoration: underline; }
+.pair-code { display: grid; gap: 8px; margin-top: 2px; padding: 13px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.pair-code > span { color: var(--text-soft); font-size: 11.5px; }
+.pair-code > div { display: flex; align-items: center; gap: 10px; }
+.pair-code > div code { min-width: 0; flex: 1; font-family: var(--font-mono); font-size: 22px; font-weight: 620; letter-spacing: .18em; }
+.pair-code button { padding: 6px 9px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--panel); color: var(--text); font: 550 11px/1 var(--font-sans); cursor: pointer; }
+.pair-code > small { color: var(--text-faint); font-size: 10.5px; line-height: 1.45; }
+.pair-code > small code { font-family: var(--font-mono); color: var(--text-soft); }
+.pair-trust { display: flex; align-items: flex-start; gap: 7px; margin-top: 12px; color: var(--text-faint); font-size: 10.5px; line-height: 1.45; }
+.pair-trust svg { flex: 0 0 auto; margin-top: 1px; }
+.pair-connected { display: flex; flex-wrap: wrap; gap: 7px; }
+.pair-connected > span { display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-faint); font-size: 11px; }
+.pair-connected > span i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
+.pair-connected > span.on { color: var(--text-soft); }
+.pair-connected > span.on i { background: var(--ok); }
+.pair-connected > code { width: 100%; margin-top: 2px; overflow: hidden; color: var(--text-faint); font: 10.5px/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .pair-tools { display: grid; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .pair-tool { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .pair-tool:last-child { border-bottom: 0; }

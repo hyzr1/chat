@@ -1,4 +1,4 @@
-name: Hyzr Agent installers
+name: Hyzr terminal launcher
 
 on:
   workflow_dispatch:
@@ -9,21 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            command: npm run build -- --win --publish never
-          - os: macos-latest
-            command: npm run build -- --mac --x64 --arm64 --publish never
-          - os: ubuntu-latest
-            command: npm run build -- --linux --publish never
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: agent
+  test-and-release:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -31,28 +18,18 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: agent/package-lock.json
-      - run: npm ci
-      - run: ${{ matrix.command }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hyzr-agent-${{ matrix.os }}
-          path: |
-            agent/dist/*.exe
-            agent/dist/*.dmg
-            agent/dist/*.AppImage
-            agent/dist/*.deb
-          if-no-files-found: error
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/agent-v')
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: release
-          merge-multiple: true
+      - working-directory: agent
+        run: npm ci
+      - working-directory: agent
+        run: npm test
+      - run: node scripts/build-agent-cli.mjs
+      - name: Show download sizes
+        run: ls -lh public/downloads/hyzr public/downloads/hyzr.cmd public/downloads/hyzr-agent.mjs
       - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/agent-v')
         with:
-          files: release/*
+          files: |
+            public/downloads/hyzr
+            public/downloads/hyzr.cmd
+            public/downloads/hyzr-agent.mjs
           generate_release_notes: true

@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   }
   if (Number(record?.agent?.protocol || 1) < 2) {
     return NextResponse.json({
-      error: "This computer is using the retired script agent. Install Hyzr Agent to preserve project folders and conversation memory.",
+      error: "This computer is using an old Hyzr bridge. Download the current tiny terminal launcher and pair again.",
       reason: "upgrade_required",
     }, { status: 426 });
   }

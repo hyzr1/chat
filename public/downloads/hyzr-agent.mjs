@@ -775,3 +775,8 @@ export async function loadAgentConfig() {
 }
 
 export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, previewEntry, specialistPlan };
+
+runAgentCli().catch((error) => {
+  console.error("\n  Hyzr stopped —", error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

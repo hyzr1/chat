@@ -1405,7 +1405,7 @@ export default function Home() {
         return copy;
       });
       if (!pairCode || !agentPaired) {
-        applyRelay("Pair your machine to run Agent tasks — open **Download → Pair your environment** and connect Claude or Codex.", false);
+        applyRelay("Connect your computer first — download the tiny Hyzr terminal launcher and enter the code it asks for.", false);
         setBusy(false); busyRef.current = false; openPair();
         return;
       }
@@ -2377,12 +2377,12 @@ export default function Home() {
             </div>}
             {workMode === "code" && (
               <div className="pair-cta">
-                <IconWindows size={20} />
+                <IconTerminal size={20} />
                 <span className="pair-cta-text">
-                  <b>Pair your machine</b>
-                  <span>Build from your phone; runs in an isolated workspace on your PC.</span>
+                  <b>Connect your computer</b>
+                  <span>One tiny terminal file. Your projects stay on your computer.</span>
                 </span>
-                <button className="pair-cta-btn" onClick={openPair}><IconWindows size={13} /> Download</button>
+                <button className="pair-cta-btn" onClick={openPair}><IconTerminal size={13} /> Connect</button>
               </div>
             )}
           </div>
@@ -2502,8 +2502,9 @@ export default function Home() {
       {showPair && (() => {
         const p = pairInfo;
         const connected = Boolean(p && !p.hosted && (p.claude?.available || p.codex?.available));
-        const origin = typeof window !== "undefined" ? window.location.origin : "";
-        const pairLink = pairCode ? `hyzr://pair?relay=${encodeURIComponent(origin)}&code=${encodeURIComponent(pairCode)}` : "";
+        const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+        const downloadPlatform = /Macintosh|Mac OS X/i.test(userAgent) ? "mac" : /Linux/i.test(userAgent) ? "linux" : "windows";
+        const downloadLabel = downloadPlatform === "windows" ? "Download hyzr.cmd" : "Download hyzr";
         const row = (icon: React.ReactNode, label: string, tool: { available: boolean; version: string | null } | null, help: React.ReactNode) => (
           <div className={`pair-tool ${tool?.available ? "on" : "off"}`}>
             <span className="pt-icon">{icon}</span>
@@ -2523,8 +2524,8 @@ export default function Home() {
             <div className="pair-sheet-head">
               <span className="pair-sheet-mark"><IconTerminal size={20} /></span>
               <div>
-                <h2>Pair your environment</h2>
-                <p>Run Agent on your own Claude and Codex — no API key, no limits. Every project gets its own isolated workspace on your machine.</p>
+                <h2>Connect your computer</h2>
+                <p>Use your local Claude and Codex from this browser.</p>
               </div>
             </div>
 
@@ -2532,56 +2533,52 @@ export default function Home() {
               <div className={`pair-status ${agentPaired ? "ready" : "pending"}`}>
                 <span className="ps-dot" />
                 {agentPaired
-                  ? `Connected — Agent routes across your ${agentInfo?.engine === "claude+codex" ? "Claude + Codex" : agentInfo?.engine === "codex" ? "Codex" : agentInfo?.engine === "claude" ? "Claude" : "machine"}${agentInfo?.host ? ` (${agentInfo.host})` : ""}.`
-                  : "Waiting for your machine — run the agent with the code below."}
+                  ? `Connected${agentInfo?.host ? ` to ${agentInfo.host}` : ""}`
+                  : "Waiting for Hyzr to connect"}
               </div>
               {agentPaired ? (
-                <div className="pair-tools">
-                  {row(<IconSparkles size={16} />, "Claude", agentInfo ? { available: agentInfo.claude, version: agentInfo.engine === "claude" ? "In use" : null } : null, <>Not connected on this machine.</>)}
-                  {row(<IconCpu size={16} />, "Codex", agentInfo ? { available: agentInfo.codex, version: agentInfo.engine === "codex" ? "In use" : null } : null, <>Not connected on this machine.</>)}
-                  {row(<IconGithub size={16} />, "Git", agentInfo ? { available: agentInfo.git, version: null } : null, <>Not detected.</>)}
-                  {row(<IconGithub size={16} />, "GitHub CLI", agentInfo ? { available: Boolean(agentInfo.gh), version: null } : null, <>Install and sign in to <code>gh</code> to browse repositories from the deployed site.</>)}
+                <div className="pair-connected">
+                  {[
+                    ["Claude", agentInfo?.claude],
+                    ["Codex", agentInfo?.codex],
+                    ["Git", agentInfo?.git],
+                    ["GitHub", agentInfo?.gh],
+                  ].map(([label, available]) => <span key={String(label)} className={available ? "on" : ""}><i />{label}</span>)}
+                  <code>{agentInfo?.workspaceRoot || "~/Hyzr"}</code>
                 </div>
               ) : (
-              <div className="pair-steps">
-                <div className="pair-step"><span className="pair-step-n">1</span><div>
-                  <b>Install Hyzr Agent</b>
-                  <span>Use the desktop installer. It reconnects automatically, keeps projects isolated, and uses your existing Claude, Codex, Git, and GitHub CLI sign-ins.</span>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 8 }}>
-                    <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }} href="/api/agent/download?platform=windows"><IconWindows size={13} /> Windows installer</a>
-                    <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }} href="/api/agent/download?platform=mac">macOS</a>
-                    <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }} href="/api/agent/download?platform=linux">Linux</a>
+                <div className="pair-cli">
+                  <a className="pair-download" href={`/api/agent/download?platform=${downloadPlatform}`}>
+                    {downloadPlatform === "windows" ? <IconWindows size={15} /> : <IconTerminal size={15} />}
+                    <span>{downloadLabel}<small>Tiny terminal launcher</small></span>
+                    <IconArrowRight size={15} />
+                  </a>
+                  <div className="pair-platforms">
+                    {downloadPlatform !== "windows" && <a href="/api/agent/download?platform=windows">Windows</a>}
+                    {downloadPlatform !== "mac" && <a href="/api/agent/download?platform=mac">macOS</a>}
+                    {downloadPlatform !== "linux" && <a href="/api/agent/download?platform=linux">Linux</a>}
                   </div>
-                </div></div>
-                <div className="pair-step"><span className="pair-step-n">2</span><div>
-                  <b>Open it and enter this code</b>
-                  <span>The code expires after 15 minutes and can be claimed only once. Keep Full developer access selected for normal Git and full local-agent behavior, or choose the restricted project-only mode.</span>
-                  {pairLink && <a className="pair-primary" style={{ display: "inline-flex", justifyContent: "center", marginTop: 8, textDecoration: "none" }} href={pairLink}>Open Hyzr Agent</a>}
-                  <div className="pair-field" style={{ marginTop: 8 }}>
-                    <code style={{ fontSize: 18, letterSpacing: "0.16em" }}>{pairCode || "······"}</code>
-                    <button onClick={() => { navigator.clipboard?.writeText(pairCode); setToast("Pairing code copied"); }}>Copy</button>
+                  <div className="pair-code">
+                    <span>Open it, then enter this code</span>
+                    <div>
+                      <code>{pairCode || "······"}</code>
+                      <button onClick={() => { navigator.clipboard?.writeText(pairCode); setToast("Code copied"); }}>Copy</button>
+                    </div>
+                    <small>Hyzr creates <code>~/Hyzr</code> for your projects. Keep the terminal open.</small>
                   </div>
-                </div></div>
-                <div className="pair-step"><span className="pair-step-n">3</span><div>
-                  <b>Build from anywhere</b>
-                  <span>This site sends Agent tasks to your machine; they run on your Claude/Codex in isolated workspaces and stream back here.</span>
-                </div></div>
-              </div>
+                </div>
               )}
-              <div className="pair-perms">
-                <IconShield size={14} />
-                <span>{agentPaired
-                  ? agentInfo?.permissionMode === "full-access"
-                    ? "Full developer access is enabled. Claude and Codex can use normal local commands, Git metadata, and filesystem context under your signed-in account."
-                    : "Project-only mode is enabled. File edits stay in the projects folder; Codex protects Git metadata and cannot access the rest of the filesystem."
-                  : "The agent makes outbound connections only. Provider credentials stay on your computer; you choose full developer access or restricted project-only access before pairing."}</span>
-              </div>
-              <div className="pair-actions">
-                {agentPaired
-                  ? <button className="pair-primary" onClick={() => { setShowPair(false); switchWorkMode("code"); }}>Open Agent</button>
-                  : <button className="pair-primary" onClick={() => setShowPair(false)}>Done</button>}
-                <span className="pair-secondary">No machine? Use the free chat or add API keys instead.</span>
-              </div>
+              {agentPaired && (
+                <div className="pair-actions">
+                  <button className="pair-primary" onClick={() => { setShowPair(false); switchWorkMode("code"); }}>Start building</button>
+                </div>
+              )}
+              {!agentPaired && (
+                <div className="pair-trust">
+                  <IconShield size={13} />
+                  <span>Only enter this code on your own computer. Hyzr uses your local developer tools and files.</span>
+                </div>
+              )}
             </>) : (<>
             <div className={`pair-status ${connected ? "ready" : "pending"}`}>
               <span className="ps-dot" />

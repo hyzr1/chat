@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "build:agent-cli": "node scripts/build-agent-cli.mjs",
+    "prebuild": "npm run build:agent-cli",
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
