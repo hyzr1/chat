@@ -602,7 +602,9 @@ export default function Home() {
   const [showLogin, setShowLogin] = useState(false);
   const [incognito, setIncognito] = useState(false);
   const [showPair, setShowPair] = useState(false);
-  const [pairInfo, setPairInfo] = useState<{ lanUrl: string; port: string; protected: boolean; code?: string; host?: string } | null>(null);
+  const [pairLoading, setPairLoading] = useState(false);
+  type Tool = { available: boolean; version: string | null };
+  const [pairInfo, setPairInfo] = useState<{ platform: string; host: string; node: Tool; git: Tool; claude: Tool; codex: Tool; workspace: { path: string; exists: boolean; projects: number }; ready: boolean } | null>(null);
   const signedIn = account !== null;
   const [toast, setToast] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -1060,14 +1062,20 @@ export default function Home() {
     if (signedIn) { action(); return; }
     setShowLogin(true);
   }
-  // Open the pairing sheet and load this machine's LAN address + code so a
-  // phone on the same network can pair and drive workspaces on this PC.
+  // Open the environment setup sheet and detect the local toolchain (Claude,
+  // Codex, Git, Node, workspace) so a user can connect their own machine and
+  // run Agent against their local CLIs instead of API keys or the free model.
   function openPair() {
     setShowPair(true);
-    fetch("/api/access/pair", { cache: "no-store" })
+    setPairLoading(true);
+    fetch("/api/setup", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((info) => info && setPairInfo(info))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setPairLoading(false));
+  }
+  function createWorkspaceRoot() {
+    fetch("/api/setup", { method: "POST" }).then(() => openPair()).catch(() => {});
   }
   function signIn(provider: string, email?: string) {
     const nextEmail = email?.trim() || `${provider.toLowerCase()}@hyzr.ai`;
@@ -2331,67 +2339,74 @@ export default function Home() {
         </div>
       )}
 
-      {showPair && (
+      {showPair && (() => {
+        const p = pairInfo;
+        const connected = Boolean(p && (p.claude.available || p.codex.available));
+        const row = (icon: React.ReactNode, label: string, tool: { available: boolean; version: string | null } | null, help: React.ReactNode) => (
+          <div className={`pair-tool ${tool?.available ? "on" : "off"}`}>
+            <span className="pt-icon">{icon}</span>
+            <div className="pt-body">
+              <b>{label}</b>
+              <span>{!p ? "Checking…" : tool?.available ? (tool.version || "Connected") : help}</span>
+            </div>
+            <span className={`pt-state ${tool?.available ? "on" : "off"}`}>
+              {!p ? <span className="spinner" /> : tool?.available ? <IconCheck size={13} /> : "Not found"}
+            </span>
+          </div>
+        );
+        return (
         <div className="login-overlay pair-overlay" onClick={() => setShowPair(false)}>
           <div className="pair-sheet" onClick={(e) => e.stopPropagation()}>
             <button className="login-close" onClick={() => setShowPair(false)} aria-label="Close"><IconX size={16} /></button>
             <div className="pair-sheet-head">
-              <span className="pair-sheet-mark"><IconWindows size={20} /></span>
+              <span className="pair-sheet-mark"><IconTerminal size={20} /></span>
               <div>
-                <h2>Pair a device</h2>
-                <p>Build from your phone. Work runs in an isolated workspace on this machine{pairInfo?.host ? ` (${pairInfo.host})` : ""}.</p>
+                <h2>Pair your environment</h2>
+                <p>Connect this machine so Agent runs on your own Claude and Codex — no API key, no limits. Every project gets its own isolated workspace.</p>
               </div>
             </div>
 
-            <div className="pair-steps">
-              <div className="pair-step">
-                <span className="pair-step-n">1</span>
-                <div>
-                  <b>Open Hyzr on your phone</b>
-                  <span>On the same Wi‑Fi, visit this address:</span>
-                  <div className="pair-field">
-                    <code>{pairInfo?.lanUrl || "Detecting your network…"}</code>
-                    {pairInfo?.lanUrl && <button onClick={() => { navigator.clipboard?.writeText(pairInfo.lanUrl); setToast("Link copied"); }}>Copy</button>}
-                  </div>
-                </div>
-              </div>
-              <div className="pair-step">
-                <span className="pair-step-n">2</span>
-                <div>
-                  <b>Enter the pairing code</b>
-                  {pairInfo?.protected ? (
-                    <>
-                      <span>Type this code when your phone asks:</span>
-                      <div className="pair-code">{(pairInfo?.code ?? "••••••").split("").map((c, i) => <b key={i}>{c}</b>)}</div>
-                      {!pairInfo?.code && <span className="pair-hint">Open this panel on the host machine to reveal the code.</span>}
-                    </>
-                  ) : (
-                    <span className="pair-hint">No code required on your network. To require one, set <code>HYZR_CHAT_ACCESS_TOKEN</code> and restart.</span>
-                  )}
-                </div>
-              </div>
-              <div className="pair-step">
-                <span className="pair-step-n">3</span>
-                <div>
-                  <b>Start building</b>
-                  <span>Your phone drives the same projects — every task runs and saves in its isolated workspace here.</span>
-                </div>
-              </div>
+            <div className={`pair-status ${connected ? "ready" : "pending"}`}>
+              <span className="ps-dot" />
+              {!p ? "Detecting your local environment…" : connected
+                ? `Connected — Agent will run on this machine (${p.host}).`
+                : "No local AI CLI found yet. Connect Claude or Codex below."}
             </div>
 
-            <div className="pair-env">
-              <div className="pair-env-row"><img src="/hyzr-chat-mark.svg" alt="" onError={(e) => (e.currentTarget.style.display = "none")} /><b>This machine</b><em>host · paired</em><span className="pair-ok"><IconCheck size={12} /></span></div>
-              <div className="pair-env-row"><IconTerminal size={16} /><b>Local environment</b><em>projects &amp; CLIs</em><span className="pair-ok"><IconCheck size={12} /></span></div>
-              <div className="pair-env-row"><IconGithub size={16} /><b>GitHub</b><em>a repo per project</em><span className="pair-ok"><IconCheck size={12} /></span></div>
+            <div className="pair-tools">
+              {row(<IconSparkles size={16} />, "Claude", p?.claude ?? null,
+                <>Not found. Install: <code>npm i -g @anthropic-ai/claude-code</code> then run <code>claude</code> once to sign in.</>)}
+              {row(<IconCpu size={16} />, "Codex", p?.codex ?? null,
+                <>Not found. Install: <code>npm i -g @openai/codex</code> then run <code>codex</code> once to sign in.</>)}
+              {row(<IconGithub size={16} />, "Git", p?.git ?? null,
+                <>Not found. Install Git so projects can version and push.</>)}
+              {row(<IconTerminal size={16} />, "Node.js", p?.node ?? null, <>Required runtime.</>)}
             </div>
 
-            <div className="pair-foot">
-              <span>Prefer a desktop app?</span>
-              <a href="https://github.com/hyzr1/chat" target="_blank" rel="noopener">Get Hyzr for Windows <IconExternal size={12} /></a>
+            <div className="pair-workspace">
+              <div className="pw-head"><IconFolder size={15} /> Projects folder</div>
+              <code>{p?.workspace.path || "…"}</code>
+              <span className="pw-note">{p?.workspace.exists
+                ? "Each project you build gets its own isolated environment inside this folder."
+                : "Not created yet — it’s made automatically on your first project."}</span>
+              {p && !p.workspace.exists && <button className="pw-create" onClick={createWorkspaceRoot}>Create it now</button>}
+            </div>
+
+            <div className="pair-perms">
+              <IconShield size={14} />
+              <span>Hyzr’s agents read and write files only inside each project’s isolated workspace — never elsewhere on your machine.</span>
+            </div>
+
+            <div className="pair-actions">
+              {connected
+                ? <button className="pair-primary" onClick={() => { setShowPair(false); switchWorkMode("code"); }}>Open Agent</button>
+                : <button className="pair-primary" onClick={openPair} disabled={pairLoading}>{pairLoading ? "Checking…" : "Re-check"}</button>}
+              <a className="pair-secondary" href="https://github.com/hyzr1/chat" target="_blank" rel="noopener">New here? Get Hyzr for Windows <IconExternal size={12} /></a>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
