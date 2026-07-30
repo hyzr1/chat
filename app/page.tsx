@@ -583,6 +583,12 @@ export default function Home() {
   const [productPrefs, setProductPrefs] = useState<ProductPrefs>(DEFAULT_PRODUCT_PREFS);
   const [view, setView] = useState<View>("chat");
   const [workMode, setWorkMode] = useState<WorkMode>("chat");
+  // Guests get the free search-only Chat. Signing in unlocks Agent, API keys,
+  // pairing, history, and settings. Mock auth for now — a real provider slots
+  // into signIn()/signOut() without touching the gating.
+  const [account, setAccount] = useState<{ name: string; email: string } | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
+  const signedIn = account !== null;
   const [toast, setToast] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [histQuery, setHistQuery] = useState("");
@@ -739,6 +745,10 @@ export default function Home() {
       try {
         const k = localStorage.getItem(KEYS_STORAGE) || localStorage.getItem(LEGACY_KEYS_STORAGE);
         if (k) setKeys({ anthropic: "", openai: "", linear: "", ...JSON.parse(k) });
+        try {
+          const savedAccount = localStorage.getItem("hyzr.chat.account");
+          if (savedAccount) setAccount(JSON.parse(savedAccount));
+        } catch {}
         const legacyRaw = localStorage.getItem(SESSIONS_KEY) || localStorage.getItem(LEGACY_SESSIONS_KEY);
         const legacy: Session[] = legacyRaw ? JSON.parse(legacyRaw) : [];
         const stored = await storeGet<Session[]>(SESSIONS_KEY).catch(() => null)
@@ -906,6 +916,11 @@ export default function Home() {
     document.documentElement.dataset.workmode = workMode;
   }, [workMode]);
 
+  // Agent is a signed-in feature; a guest (or a sign-out) can never sit in it.
+  useEffect(() => {
+    if (!signedIn && workMode === "code") { setWorkMode("chat"); setPlanOn(false); }
+  }, [signedIn, workMode]);
+
   useEffect(() => {
     document.documentElement.dataset.motion = productPrefs.reducedMotion ? "reduced" : "full";
     document.documentElement.dataset.density = productPrefs.compactChat ? "compact" : "comfortable";
@@ -1024,9 +1039,26 @@ export default function Home() {
     setOverride("auto");
     setShowModels(false);
   }
+  function requireAuth(action: () => void) {
+    if (signedIn) { action(); return; }
+    setShowLogin(true);
+  }
+  function signIn(provider: string, email?: string) {
+    const nextEmail = email?.trim() || `${provider.toLowerCase()}@hyzr.ai`;
+    const next = { name: nextEmail.split("@")[0] || "You", email: nextEmail };
+    setAccount(next);
+    setShowLogin(false);
+    try { localStorage.setItem("hyzr.chat.account", JSON.stringify(next)); } catch {}
+  }
+  function signOut() {
+    setAccount(null);
+    setWorkMode("chat");
+    try { localStorage.removeItem("hyzr.chat.account"); } catch {}
+  }
   // Chat = fast conversation/search (routing only, no workspace). Code = the
   // full building surface: projects, tasks, proof, work intake, the pairer.
   function switchWorkMode(next: WorkMode) {
+    if (next === "code" && !signedIn) { setShowLogin(true); return; }
     setWorkMode(next);
     if (next === "chat") {
       // Chat mode has no workspace views; always land on the conversation.
@@ -1776,6 +1808,14 @@ export default function Home() {
             </div>
           )}
         </div>
+        <div className="composer-modes">
+          <button className={`cm-pill ${workMode === "chat" ? "on" : ""}`} onClick={() => switchWorkMode("chat")}>
+            <IconSearch size={14} /> Chat
+          </button>
+          <button className={`cm-pill ${workMode === "code" ? "on" : ""}`} onClick={() => requireAuth(() => switchWorkMode("code"))}>
+            <IconTerminal size={14} /> Agent
+          </button>
+        </div>
         {workMode === "code" && mode === "local" && (
           <button
             className={`tool-btn ${planOn ? "active" : ""}`}
@@ -1786,7 +1826,7 @@ export default function Home() {
           </button>
         )}
         <div className="spacer" />
-        <div className="model-picker" style={{ position: "relative" }}>
+        {workMode === "code" && <div className="model-picker" style={{ position: "relative" }}>
           <button
             className={`tool-btn ${override !== "auto" ? "active" : ""}`}
             onClick={() => setShowModels((s) => !s)}
@@ -1832,7 +1872,7 @@ export default function Home() {
               />
             </>
           )}
-        </div>
+        </div>}
         {productPrefs.voiceInput && <button
           className={`round-btn ${listening ? "rec" : ""}`}
           onClick={toggleVoice}
@@ -1953,6 +1993,7 @@ export default function Home() {
           })}
         </div>}
 
+        {signedIn && (<>
         <div className="side-section">
           <span>History</span>
           {looseSessions.length > 0 && <span>{looseSessions.length}</span>}
@@ -1988,11 +2029,21 @@ export default function Home() {
               ))
           )}
         </div>
+        </>)}
+        {!signedIn && <div className="guest-fill" />}
 
         <div className="side-bottom">
-          <button className="side-utility" onClick={() => { setCollapsed(true); setShowSettings(true); }}>
-            <IconSliders size={15} /><span>Settings</span>
-          </button>
+          {signedIn ? (
+            <button className="side-account" onClick={() => { setCollapsed(true); setShowSettings(true); }}>
+              <span className="side-avatar">{(account?.name?.[0] ?? "Y").toUpperCase()}</span>
+              <span className="side-account-name">{account?.name ?? "You"}</span>
+              <IconSliders size={15} />
+            </button>
+          ) : (
+            <button className="side-signin" onClick={() => setShowLogin(true)}>
+              <IconSparkles size={15} /><span>Sign in</span>
+            </button>
+          )}
         </div>
       </aside>
       {!collapsed && (
@@ -2038,7 +2089,9 @@ export default function Home() {
             <button className={mode === "local" ? "on" : ""} onClick={() => switchMode("local")} title="Use local subscriptions">Local</button>
             <button className={mode === "byok" ? "on" : ""} onClick={() => switchMode("byok")} title="Use API keys">API</button>
           </div>}
-          <button className="top-icon" onClick={() => setShowSettings(true)} title="Settings"><IconSliders size={15} /></button>
+          {signedIn
+            ? <button className="top-icon" onClick={() => setShowSettings(true)} title="Settings"><IconSliders size={15} /></button>
+            : <button className="top-signin" onClick={() => setShowLogin(true)}>Sign in</button>}
         </div>
 
         {view === "tasks" ? (
@@ -2078,15 +2131,10 @@ export default function Home() {
         ) : messages.length === 0 ? (
           <div className="center">
             <div className="home-intro">
-              <span className="home-mark"><HyzrMark size={22} /></span>
-              <span className="home-kicker">{workMode === "chat" ? "Chat" : "Agent"}</span>
               <h1>{workMode === "chat" ? "What do you want to know?" : "What should we build?"}</h1>
-              <p>{workMode === "chat"
-                ? "A fast answer engine. Ask anything and Hyzr routes it to the right model. Switch to Agent to build in a paired workspace."
-                : "Describe the outcome. Hyzr plans the work, routes each task to the right model, and builds it in an isolated, verified workspace."}</p>
             </div>
             {composer}
-            <div className="suggestions">
+            {workMode === "code" && <div className="suggestions">
               {SUGGESTIONS.map((s) => (
                 <button
                   key={s.label}
@@ -2103,7 +2151,7 @@ export default function Home() {
                   {s.label}
                 </button>
               ))}
-            </div>
+            </div>}
           </div>
         ) : (
           <>
@@ -2191,6 +2239,25 @@ export default function Home() {
       {toast && (
         <div className="toast">
           <IconCheck size={15} /> {toast}
+        </div>
+      )}
+
+      {showLogin && (
+        <div className="login-overlay" onClick={() => setShowLogin(false)}>
+          <div className="login-card" onClick={(e) => e.stopPropagation()}>
+            <button className="login-close" onClick={() => setShowLogin(false)} aria-label="Close"><IconX size={16} /></button>
+            <span className="login-mark"><HyzrMark size={30} /></span>
+            <h2>Log in or sign up</h2>
+            <p>Save your history, use API keys, and pair your local environment for Agent mode.</p>
+            <button className="login-provider google" onClick={() => signIn("Google")}>Continue with Google</button>
+            <button className="login-provider apple" onClick={() => signIn("Apple")}>Continue with Apple</button>
+            <div className="login-divider"><span>or</span></div>
+            <form className="login-email" onSubmit={(e) => { e.preventDefault(); const email = (new FormData(e.currentTarget).get("email") as string) || ""; if (email.trim()) signIn("email", email); }}>
+              <input name="email" type="email" placeholder="Enter your email" autoComplete="email" required />
+              <button type="submit">Continue with email</button>
+            </form>
+            <small>By continuing you agree to the Terms and Privacy Policy.</small>
+          </div>
         </div>
       )}
     </div>

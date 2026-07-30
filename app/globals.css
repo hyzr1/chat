@@ -949,31 +949,16 @@ select {
   justify-content: center;
   padding: 0 20px 5vh;
 }
-/* Minimal, centered empty state — Perplexity/z.ai style. */
-.home-intro { width: 100%; max-width: 720px; margin-bottom: 26px; text-align: center; }
-.home-mark { display: none; }
-.home-kicker {
-  display: inline-block;
-  margin-bottom: 12px;
-  color: var(--accent-ink);
-  font-size: 14px;
-  font-weight: 560;
-  letter-spacing: -0.01em;
-}
+/* Minimal, left-aligned empty state — Perplexity style. Just the heading. */
+.home-intro { width: 100%; max-width: 760px; margin-bottom: 16px; text-align: left; }
+.home-mark, .home-kicker, .home-intro p { display: none; }
 .home-intro h1 {
-  margin: 0 0 10px;
+  margin: 0;
   color: var(--text);
-  font-size: clamp(30px, 3.6vw, 44px);
+  font-size: clamp(24px, 2.7vw, 33px);
   font-weight: 500;
-  letter-spacing: -.03em;
-  line-height: 1.08;
-}
-.home-intro p {
-  max-width: 520px;
-  margin: 0 auto;
-  color: var(--text-faint);
-  font-size: 14px;
-  line-height: 1.55;
+  letter-spacing: -.025em;
+  line-height: 1.12;
 }
 /* Agent mode gets its own personality: a soft accent glow (Perplexity's
    Computer mode). Only on the empty-state composer, kept subtle. */
@@ -4308,3 +4293,180 @@ select {
 .pair-page button:disabled { opacity:.45; cursor:default; }
 .pair-page .pair-error { color:var(--danger); font-size:12px; }
 .pair-page small { color:var(--text-faint); text-align:center; font-size:10px; }
+
+/* ---------------- Guest / auth + Claude-style composer mode pills ---------------- */
+/* In-composer Chat | Agent segmented control, styled like Claude's Chat|Cowork. */
+.composer-modes { display: inline-flex; align-items: center; gap: 2px; }
+.cm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.cm-pill svg { color: var(--text-faint); transition: color 0.15s; }
+.cm-pill.on {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.cm-pill.on svg { color: var(--accent-ink); }
+.cm-pill:not(.on):hover { color: var(--text-soft); }
+
+/* Sidebar sign-in / account row */
+.guest-fill { flex: 1; }
+.side-signin {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.13s;
+}
+.side-signin svg { color: var(--accent-ink); }
+.side-signin:hover { background: var(--panel-2); }
+.side-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.13s;
+}
+.side-account:hover { background: var(--panel-2); }
+.side-avatar {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+}
+.side-account-name { flex: 1; text-align: left; color: var(--text); font-size: 13px; font-weight: 500; }
+.side-account svg { color: var(--text-faint); }
+
+/* Top-right sign-in button (guest) */
+.top-signin {
+  padding: 7px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--bg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.top-signin:hover { opacity: 0.9; }
+
+/* Login modal — Perplexity/Claude style */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: fade 0.15s ease;
+}
+.login-card {
+  position: relative;
+  width: 100%;
+  max-width: 384px;
+  padding: 34px 30px 24px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--panel);
+  box-shadow: 0 40px 90px -24px rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+.login-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+}
+.login-close:hover { background: var(--panel-2); color: var(--text); }
+.login-mark { display: inline-grid; margin-bottom: 16px; }
+.login-card h2 { margin: 0 0 6px; font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
+.login-card > p { margin: 0 0 22px; color: var(--text-faint); font-size: 13px; line-height: 1.5; }
+.login-provider {
+  display: block;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.13s, opacity 0.13s;
+}
+.login-provider.google { background: var(--panel); color: var(--text); }
+.login-provider.google:hover { background: var(--panel-2); }
+.login-provider.apple { background: #111113; color: #fff; border-color: #111113; }
+.login-provider.apple:hover { opacity: 0.9; }
+.login-divider { display: flex; align-items: center; gap: 12px; margin: 14px 2px; color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+.login-divider::before, .login-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.login-email { display: grid; gap: 10px; }
+.login-email input {
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: var(--field);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.login-email input:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-soft); }
+.login-email button {
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.13s;
+}
+.login-email button:hover { background: var(--panel-hi); }
+.login-card small { display: block; margin-top: 18px; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
