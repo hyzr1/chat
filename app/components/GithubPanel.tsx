@@ -56,19 +56,33 @@ export default function GithubPanel({
   const [repoTab, setRepoTab] = useState<"issues" | "files">("issues");
   const [issues, setIssues] = useState<Issue[] | null>(null);
 
+  async function githubJson(url: string) {
+    const response = await fetch(url);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `GitHub request failed (${response.status})`);
+    return payload;
+  }
+
+  async function loadRepositories() {
+    setError(null);
+    setRepos(null);
+    try {
+      const [status, repositoryList] = await Promise.all([
+        githubJson("/api/github?action=status"),
+        githubJson("/api/github?action=repos"),
+      ]);
+      if (!status.connected) throw new Error(status.error || "GitHub CLI is not signed in");
+      setLogin(status.login);
+      setRepos(repositoryList.repos ?? []);
+    } catch (e: any) {
+      setError(e?.message ?? "Local GitHub CLI request failed");
+    }
+  }
+
   useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch("/api/github?action=status").then((r) => r.json());
-        if (r.connected) setLogin(r.login);
-        else setError(r.error || "Not connected");
-        const rr = await fetch("/api/github?action=repos").then((r) => r.json());
-        if (rr.repos) setRepos(rr.repos);
-        else setError(rr.error || "Could not list repos");
-      } catch (e: any) {
-        setError(e?.message ?? "GitHub request failed");
-      }
-    })();
+    void loadRepositories();
+  // The initial fetch is intentionally one-shot; Retry calls the same function.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function openRepo(name: string) {
@@ -130,7 +144,7 @@ export default function GithubPanel({
                 <span className="spinner" /> Loading repositories…
               </div>
             )}
-            {error && !repos && <div className="integration-empty"><span><IconGithub size={20} /></span><h2>Connect GitHub</h2><p>{error}. Install the Hyzr Chat GitHub App for repository-scoped issue intake, PR delivery, Checks, and post-merge regression tracking. The local <code>gh</code> fallback remains available.</p><a className="integration-connect" href="/api/integrations/github/install">Install GitHub App <IconArrowRight size={13} /></a></div>}
+            {error && !repos && <div className="integration-empty"><span><IconGithub size={20} /></span><h2>GitHub CLI unavailable</h2><p>{error}. Hyzr uses the <code>gh</code> sign-in already present on your paired computer.</p><button className="integration-connect" onClick={() => void loadRepositories()}>Retry GitHub <IconArrowRight size={13} /></button><a href="/api/integrations/github/install">Use the GitHub App instead</a></div>}
             {repos && <div className="github-toolbar"><div className="search-box"><IconSearch size={14} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a repository" /></div><span>{visibleRepos.length} repositories</span></div>}
             <div className="repo-grid">
             {visibleRepos.map((r) => (

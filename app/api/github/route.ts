@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
         path: sp.get("path") || "",
         state: sp.get("state") || "open",
         number: sp.get("number") || "",
-      });
+      }, method === "github.repos" ? 45_000 : 30_000);
       return NextResponse.json(data, { headers: { "Cache-Control": "no-store" } });
     }
 

@@ -112,8 +112,7 @@ const GUIDANCE =
   "question, answer directly in your message — do NOT look for or create files. " +
   "Only create, edit, or run files when the user explicitly asks you to build, " +
   "create, scaffold, save, deploy, or run something, or names a specific file. " +
-  "Your working directory is a disposable scratch workspace. Hyzr Chat owns the user-facing preview server, so do not repeatedly open localhost in a browser and do not report 127.0.0.1 or localhost as the final preview link. " +
-  "For static projects, write/build the files and let Hyzr Chat serve them. If a framework server is genuinely required, bind it to 0.0.0.0 and verify it once with an HTTP request instead of repeated browser loads. Format answers in Markdown.";
+  "Your working directory is a disposable scratch workspace. Run the commands the user requests and report their actual output and exact URLs without rewriting hostnames or ports. Format answers in Markdown.";
 async function ensureWorkspace(id?: string) {
   const workspace = workspaceFor(id);
   try { await fs.mkdir(workspace, { recursive: true }); } catch {}

@@ -61,6 +61,10 @@ test("preview discovery recognizes declared and framework dev ports", () => {
   assert.equal(__test.previewPortFor({}, "next dev"), 3000);
   assert.equal(__test.previewPortFor({}, "vite"), 5173);
   assert.equal(__test.previewPortFor({}, "node server.js"), null);
+  assert.equal(__test.previewPortFromPrompt("run it at http://localhost:8080/"), 8080);
+  assert.equal(__test.previewPortFromPrompt("start the server on port 6000"), 6000);
+  assert.equal(__test.previewPortFromPrompt("yes 8080"), 8080);
+  assert.equal(__test.previewPortFromPrompt("no server requested"), null);
 });
 
 test("preview servers bind framework-specific hosts for Wi-Fi access", () => {
@@ -88,17 +92,16 @@ test("preview discovery selects a private LAN address only", () => {
   }), null);
 });
 
-test("static projects run on a direct local preview server", async () => {
+test("static projects never cause Preview to create a substitute server", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hyzr-static-preview-"));
   const workspace = path.join(root, "static-chat");
   await mkdir(workspace);
   await writeFile(path.join(workspace, "index.html"), "<!doctype html><h1>Direct local preview</h1>");
   try {
-    const result = await __test.startPreviewServer({ workspaceRoot: root, tools: {} }, "static-chat");
-    assert.match(result.localUrl, /^http:\/\/localhost:\d+$/);
-    const response = await fetch(result.localUrl);
-    assert.equal(response.status, 200);
-    assert.match(await response.text(), /Direct local preview/);
+    await assert.rejects(
+      () => __test.startPreviewServer({ workspaceRoot: root, tools: {} }, "static-chat"),
+      /No running project server was detected/,
+    );
   } finally {
     __test.sweepPreviewServers(true);
     await rm(root, { recursive: true, force: true });

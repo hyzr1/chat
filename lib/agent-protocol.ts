@@ -1,8 +1,8 @@
 export const AGENT_PROTOCOL_VERSION = 3;
-// A dedicated launcher heartbeat normally arrives every five seconds. Keep a
-// wider compatibility window for older launchers that only refresh presence
-// when polling or streaming a result.
-export const AGENT_ONLINE_WINDOW_MS = 60_000;
+// The current launcher heartbeats every two seconds. A closed or killed
+// terminal must never look connected for a full minute; three missed beats is
+// enough to mark it offline while tolerating a brief network hiccup.
+export const AGENT_ONLINE_WINDOW_MS = 6_500;
 
 export type AgentEngine = "claude" | "codex";
 export type AgentPermissionMode = "workspace" | "full-access";

@@ -608,7 +608,7 @@ export default function Home() {
   const [showModels, setShowModels] = useState(false);
   const [override, setOverride] = useState("auto");
   const [mode, setMode] = useState<Mode>("local");
-  const [planOn, setPlanOn] = useState(true);
+  const [planOn, setPlanOn] = useState(false);
   const [effort, setEffort] = useState<Effort>("high");
   const [theme, setTheme] = useState<Theme>("light");
   const [productPrefs, setProductPrefs] = useState<ProductPrefs>(DEFAULT_PRODUCT_PREFS);
@@ -836,7 +836,9 @@ export default function Home() {
           if (prefs.productPrefs) setProductPrefs({ ...DEFAULT_PRODUCT_PREFS, ...prefs.productPrefs });
           if (prefs.routingRules && prefs.routingPolicyVersion === 3) setRoutingRules({ ...DEFAULT_ROUTING_RULES, ...prefs.routingRules });
           else setRoutingRules(DEFAULT_ROUTING_RULES);
-          if (typeof prefs.planOn === "boolean") setPlanOn(prefs.planOn);
+          // Planning is an explicit per-session action. Agent mode must open
+          // as a direct Claude/Codex session instead of silently restoring
+          // orchestration from an earlier visit.
           if (["low", "medium", "high", "xhigh", "max", "ultra"].includes(prefs.effort)) setEffort(prefs.effort);
           // Desktop remembers its compact sidebar. Mobile starts closed in the
           // layout handshake and must not have a late preference read override
@@ -1022,7 +1024,7 @@ export default function Home() {
       })
       .catch(() => {});
     void refresh();
-    const timer = window.setInterval(refresh, 8_000);
+    const timer = window.setInterval(refresh, 2_000);
     return () => { live = false; window.clearInterval(timer); };
   }, [signedIn, workMode, showPair]);
 
@@ -1238,8 +1240,6 @@ export default function Home() {
       // Chat mode has no workspace views; always land on the conversation.
       if (!CHAT_MODE_VIEWS.has(view)) openView("chat");
       setPlanOn(false);
-    } else {
-      setPlanOn(true);
     }
     if (isMobileViewport()) setCollapsed(true);
   }
@@ -1270,7 +1270,7 @@ export default function Home() {
   function openSession(s: Session) {
     const surface = inferredSessionSurface(s);
     setWorkMode(surface);
-    setPlanOn(surface === "code");
+    setPlanOn(false);
     setCurrentId(s.id);
     applyingRemoteMessagesRef.current = true;
     setMessages(s.messages);

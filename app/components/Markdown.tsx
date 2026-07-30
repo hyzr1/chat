@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, ReactNode, isValidElement } from "react";
+import { useState, ReactNode, isValidElement } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -42,19 +42,6 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 }
 
 export default function Markdown({ content }: { content: string }) {
-  const [browserHost, setBrowserHost] = useState("");
-  useEffect(() => setBrowserHost(window.location.hostname), []);
-  const reachableHref = (href?: string) => {
-    if (!href || !browserHost) return href;
-    try {
-      const url = new URL(href);
-      if (["localhost", "127.0.0.1", "::1"].includes(url.hostname) && !["localhost", "127.0.0.1", "::1"].includes(browserHost)) {
-        url.hostname = browserHost;
-        return url.toString();
-      }
-    } catch {}
-    return href;
-  };
   return (
     <div className="md">
       <ReactMarkdown
@@ -62,11 +49,7 @@ export default function Markdown({ content }: { content: string }) {
         rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
         components={{
           pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-          a: ({ href, children }) => {
-            const safeHref = reachableHref(href);
-            const visible = textOf(children).trim() === href ? safeHref : children;
-            return <a href={safeHref} target="_blank" rel="noreferrer">{visible}</a>;
-          },
+          a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
         }}
       >
         {content}

@@ -1,5 +1,18 @@
 @echo off
 setlocal EnableExtensions
+
+if /i "%~1"=="--hyzr-console" (
+  shift
+  goto :console_ready
+)
+
+rem Open a dedicated PowerShell-hosted console so Windows uses its modern
+rem Consolas/Cascadia font profile instead of the legacy cmd raster font.
+set "HYZR_LAUNCHER=%~f0"
+start "Hyzr Agent" powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$Host.UI.RawUI.WindowTitle='Hyzr Agent'; & $env:ComSpec /d /s /c ('\"' + $env:HYZR_LAUNCHER + '\" --hyzr-console'); exit $LASTEXITCODE"
+exit /b
+
+:console_ready
 chcp 65001 >nul 2>nul
 title Hyzr Agent
 color 07
