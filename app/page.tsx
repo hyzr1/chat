@@ -606,6 +606,7 @@ export default function Home() {
   const [keys, setKeys] = useState<Keys>({ anthropic: "", openai: "", linear: "" });
   const [showSettings, setShowSettings] = useState(false);
   const [showModels, setShowModels] = useState(false);
+  const [showEffort, setShowEffort] = useState(false);
   const [override, setOverride] = useState("auto");
   const [mode, setMode] = useState<Mode>("local");
   const [planOn, setPlanOn] = useState(false);
@@ -625,7 +626,7 @@ export default function Home() {
   const [agentPaired, setAgentPaired] = useState(false);
   const [pairCode, setPairCode] = useState("");
   const [hosted, setHosted] = useState(false);
-  const [agentInfo, setAgentInfo] = useState<{ host: string; engine: string; claude: boolean; codex: boolean; git: boolean; gh?: boolean; node: string; workspaceRoot?: string; permissionMode?: string; protocol?: number } | null>(null);
+  const [agentInfo, setAgentInfo] = useState<{ host: string; platform?: string; engine: string; claude: boolean; codex: boolean; git: boolean; gh?: boolean; node: string; workspaceRoot?: string; permissionMode?: string; protocol?: number } | null>(null);
   const pairPollRef = useRef<number | null>(null);
   type Tool = { available: boolean; version: string | null };
   const [pairInfo, setPairInfo] = useState<{ hosted?: boolean; platform: string; host?: string; node?: Tool; git?: Tool; gh?: Tool; claude?: Tool; codex?: Tool; workspace?: { path: string; exists: boolean; projects: number }; agentConnected?: boolean; agent?: typeof agentInfo; ready: boolean } | null>(null);
@@ -635,6 +636,7 @@ export default function Home() {
   const [histQuery, setHistQuery] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showPlus, setShowPlus] = useState(false);
+  const [plusPanel, setPlusPanel] = useState<"connectors" | "projects" | null>(null);
   const [listening, setListening] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [queuedInstructions, setQueuedInstructions] = useState<string[]>([]);
@@ -1116,8 +1118,10 @@ export default function Home() {
         newChat();
       } else if (e.key === "Escape") {
         setShowModels(false);
+        setShowEffort(false);
         setShowSettings(false);
         setShowPlus(false);
+        setPlusPanel(null);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -2175,7 +2179,10 @@ export default function Home() {
         <div className="attach-picker" style={{ position: "relative" }}>
           <button
             className="round-btn"
-            onClick={() => setShowPlus((s) => !s)}
+            onClick={() => {
+              setShowPlus((s) => !s);
+              setPlusPanel(null);
+            }}
             title="Attach"
           >
             <IconPlus size={17} />
@@ -2190,22 +2197,24 @@ export default function Home() {
               >
                 <IconAttach size={15} /> Upload files or images
               </button>
-              <button
-                onClick={() => {
-                  setShowPlus(false);
-                  openView("connectors");
-                }}
-              >
-                <IconPlug size={15} /> Connectors
-              </button>
-              <button
-                onClick={() => {
-                  setShowPlus(false);
-                  setView("spaces");
-                }}
-              >
-                <IconLayers size={15} /> Spaces
-              </button>
+              <div className="plus-menu-item" onMouseEnter={() => setPlusPanel("connectors")}>
+                <button onClick={() => setPlusPanel(plusPanel === "connectors" ? null : "connectors")}>
+                  <IconPlug size={15} /><span>Connectors</span><IconChevron size={13} className="submenu-chevron" />
+                </button>
+                {plusPanel === "connectors" && <div className="plus-submenu">
+                  <button onClick={() => { setShowPlus(false); openView("github"); }}><IconGithub size={15} /> GitHub</button>
+                  <button onClick={() => { setShowPlus(false); openView("connectors"); }}><IconPlug size={15} /> All connectors</button>
+                </div>}
+              </div>
+              <div className="plus-menu-item" onMouseEnter={() => setPlusPanel("projects")}>
+                <button onClick={() => setPlusPanel(plusPanel === "projects" ? null : "projects")}>
+                  <IconFolder size={15} /><span>Projects</span><IconChevron size={13} className="submenu-chevron" />
+                </button>
+                {plusPanel === "projects" && <div className="plus-submenu">
+                  <button onClick={() => { setShowPlus(false); openView("spaces"); }}><IconLayers size={15} /> Project spaces</button>
+                  <button onClick={() => { setShowPlus(false); newChat(); }}><IconPlus size={15} /> New project chat</button>
+                </div>}
+              </div>
             </div>
           )}
         </div>
@@ -2227,52 +2236,57 @@ export default function Home() {
           </button>
         )}
         <div className="spacer" />
-        {workMode === "code" && <div className="model-picker" style={{ position: "relative" }}>
-          <button
-            className={`tool-btn ${override !== "auto" ? "active" : ""}`}
-            onClick={() => setShowModels((s) => !s)}
-          >
-            {override === "auto" ? (
-              <IconSparkles size={15} />
-            ) : (
-              <BrandMark brand={brandFor(findModel(mode, override)?.engine ?? override)} size={15} />
-            )}
-            <span className="picker-label">
+        {workMode === "code" && <div className="model-controls">
+          <div className="model-picker" style={{ position: "relative" }}>
+            <button
+              className={`tool-btn model-trigger ${override !== "auto" ? "active" : ""}`}
+              onClick={() => {
+                setShowModels((s) => !s);
+                setShowEffort(false);
+              }}
+              aria-label="Choose model"
+            >
+              {override === "auto" ? <IconRoute size={14} /> : <BrandMark brand={brandFor(findModel(mode, override)?.engine ?? override)} size={14} />}
               <span className="picker-name-full">{override === "auto" ? "Auto" : findModel(mode, override)?.label ?? "Model"}</span>
               <span className="picker-name-short">{override === "auto" ? "Auto" : shortModelLabel(findModel(mode, override)?.label ?? "Model")}</span>
-              <span> · {effort === "xhigh" ? "Extra" : effort[0].toUpperCase() + effort.slice(1)}</span>
-            </span>
-            <IconChevron size={14} className="chev" />
-          </button>
-          {showModels && (
-            <>
-              <button className="model-menu-backdrop" aria-label="Close model menu" onClick={() => setShowModels(false)} />
-              <ModelMenu
-                models={menuModels(mode)}
-                value={override}
-                enabled={modelPool[mode]}
-                effort={effort}
-                onClose={() => setShowModels(false)}
-                onPick={(id) => {
-                  setOverride(id);
-                  setShowModels(false);
-                }}
-                onToggle={(id) => {
-                  setModelPool((prev) => {
-                    const pool = prev[mode];
-                    const next = pool.includes(id) ? pool.filter((x) => x !== id) : [...pool, id];
-                    if (!next.length) {
-                      setToast("Keep at least one model in the pool");
-                      return prev;
-                    }
-                    if (override === id && !next.includes(id)) setOverride("auto");
-                    return { ...prev, [mode]: next };
-                  });
-                }}
-                onEffort={setEffort}
-              />
-            </>
-          )}
+              <IconChevron size={13} className="chev" />
+            </button>
+            {showModels && (
+              <>
+                <button className="model-menu-backdrop" aria-label="Close model menu" onClick={() => setShowModels(false)} />
+                <ModelMenu
+                  models={menuModels(mode)}
+                  value={override}
+                  enabled={modelPool[mode]}
+                  onClose={() => setShowModels(false)}
+                  onPick={(id) => {
+                    setOverride(id);
+                    setShowModels(false);
+                  }}
+                />
+              </>
+            )}
+          </div>
+          <div className="effort-control" style={{ position: "relative" }}>
+            <button
+              className="tool-btn effort-trigger"
+              onClick={() => {
+                setShowEffort((s) => !s);
+                setShowModels(false);
+              }}
+              aria-label={`Reasoning effort: ${effort === "xhigh" ? "Extra" : effort[0].toUpperCase() + effort.slice(1)}`}
+            >
+              <IconGauge size={14} />
+              <span>{effort === "xhigh" ? "Extra" : effort[0].toUpperCase() + effort.slice(1)}</span>
+              <IconChevron size={13} className="chev" />
+            </button>
+            {showEffort && (
+              <>
+                <button className="model-menu-backdrop" aria-label="Close effort menu" onClick={() => setShowEffort(false)} />
+                <EffortMenu value={effort} onPick={setEffort} onClose={() => setShowEffort(false)} />
+              </>
+            )}
+          </div>
         </div>}
         {productPrefs.voiceInput && <button
           className={`round-btn ${listening ? "rec" : ""}`}
@@ -2503,6 +2517,7 @@ export default function Home() {
               onClick={() => requireAuth(() => openPair())}
               title={agentPaired ? `Connected to ${agentInfo?.host || "your computer"}` : agentInfo ? "Reopen Hyzr on your computer" : "Connect your computer"}
             >
+              <IconWindows size={13} className="agent-presence-platform" />
               <i />
               <span>{agentPaired ? agentInfo?.host || "Computer connected" : agentInfo ? "Computer offline" : "Connect computer"}</span>
               <IconChevron size={11} />
@@ -2558,19 +2573,16 @@ export default function Home() {
         ) : messages.length === 0 ? (
           <div className="center">
             <div className="home-intro">
-              {workMode === "code" && (
-                <span className={`agent-kicker ${agentPaired ? "online" : ""}`}>
-                  <i /> {agentPaired ? `${agentInfo?.host || "Your computer"} is ready` : agentInfo ? "Your computer is offline" : "Local workspace"}
-                </span>
-              )}
-              <h1>{incognito ? "You’re incognito" : workMode === "chat" ? "What do you want to know?" : "What should we build?"}</h1>
-              {workMode === "code" && (
-                <p className="agent-intro-copy">
-                  {agentPaired
-                    ? `Claude and Codex can work directly in ${agentInfo?.workspaceRoot || "your local project folder"}.`
-                    : "Pair once, then build from this browser or your phone while every file stays on your computer."}
-                </p>
-              )}
+              <h1 className="home-mode-title" aria-live="polite">
+                {incognito ? (
+                  <span className="visible">You&apos;re incognito</span>
+                ) : (
+                  <>
+                    <span className={workMode === "chat" ? "visible" : ""} aria-hidden={workMode !== "chat"}>What do you want to know?</span>
+                    <span className={workMode === "code" ? "visible" : ""} aria-hidden={workMode !== "code"}>What should we build?</span>
+                  </>
+                )}
+              </h1>
             </div>
             {composer}
             {incognito && <p className="incognito-note">Sessions you create won’t be saved to your history.</p>}
@@ -2594,10 +2606,10 @@ export default function Home() {
             </div>}
             {workMode === "code" && (agentPaired ? (
               <button className="agent-ready-card" onClick={openPair}>
-                <span className="agent-ready-icon"><IconTerminal size={15} /></span>
+                <span className="agent-ready-icon"><IconWindows size={15} /></span>
                 <span className="agent-ready-copy">
                   <b>Connected to {agentInfo?.host || "your computer"}</b>
-                  <span>{pairedToolLabel || "Local tools ready"} · Projects stay in {agentInfo?.workspaceRoot || "~/Hyzr"}</span>
+                  <span>{pairedToolLabel || "Local tools ready"}</span>
                 </span>
                 <span className="agent-ready-manage">Manage <IconChevron size={11} /></span>
               </button>
@@ -2870,139 +2882,112 @@ function ModelMenu({
   models,
   value,
   enabled,
-  effort,
   onPick,
-  onToggle,
-  onEffort,
   onClose,
 }: {
   models: MenuModel[];
   value: string;
   enabled: string[];
-  effort: Effort;
   onPick: (id: string) => void;
-  onToggle: (id: string) => void;
-  onEffort: (effort: Effort) => void;
   onClose: () => void;
 }) {
-  const [panel, setPanel] = useState<"effort" | "models" | null>(null);
+  const [showMore, setShowMore] = useState(false);
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (panel) setPanel(null);
+      if (showMore) setShowMore(false);
       else onClose();
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [panel, onClose]);
+  }, [showMore, onClose]);
   const preferredIds = ["gpt-5.6-sol", "claude-opus", "gpt-5.6-terra", "claude-sonnet"];
   let featured = preferredIds.map((id) => models.find((model) => model.id === id)).filter((model): model is MenuModel => !!model);
   if (!featured.length) featured = models.slice(0, 4);
   const forced = value !== "auto" ? models.find((model) => model.id === value) : undefined;
   if (forced && !featured.some((model) => model.id === forced.id)) featured = [forced, ...featured.slice(0, 3)];
-  const effortLabel = (level: Effort) => level === "xhigh" ? "Extra" : level[0].toUpperCase() + level.slice(1);
-  const effortDescriptions: Record<Effort, string> = {
-    low: "Fast responses with lighter reasoning",
-    medium: "Balanced speed and reasoning depth",
-    high: "Thorough reasoning for complex work",
-    xhigh: "Extra depth for difficult problems",
-    max: "Maximum reasoning depth",
-    ultra: "Maximum depth with task delegation",
-  };
-  const effortLevels: Effort[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
-  const effortIndex = effortLevels.indexOf(effort);
+  const moreModels = models.filter((model) => !featured.some((featuredModel) => featuredModel.id === model.id));
   return (
-    <div className="menu">
-      <div className="menu-mobile-head"><span /><strong>Model &amp; effort</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
-      <div className="menu-head">
-        <IconRoute size={14} /> Choose a model
-      </div>
-      <div className={`menu-item ${value === "auto" ? "sel" : ""}`} onClick={() => onPick("auto")}>
-        <div className="menu-ic">
-          <IconSparkles size={15} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div className="m-label">Auto · cost-aware routing</div>
-          <div className="m-blurb">
-            Uses lightweight models for trivial work, balanced models for everyday builds, and frontier models only for hard tasks.
-          </div>
-        </div>
-        <span className="menu-check">
-          <IconCheck size={15} />
-        </span>
-      </div>
-      <div className="menu-section-label">Suggested</div>
+    <div className="menu simple-model-menu">
+      <div className="menu-mobile-head"><span /><strong>Models</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
+      <div className="simple-menu-title">Models</div>
+      <button className={`simple-model-row ${value === "auto" ? "selected" : ""}`} onClick={() => onPick("auto")}>
+        <span className="simple-model-icon"><IconRoute size={16} /></span>
+        <strong>Auto</strong>
+        {value === "auto" && <IconCheck size={15} />}
+      </button>
       {featured.map((m) => (
-        <button key={m.id} className={`primary-model-row ${value === m.id ? "selected" : ""}`} onClick={() => onPick(m.id)}>
-          <div className="menu-ic">
-            <BrandMark brand={brandFor(m.engine)} size={16} />
-          </div>
-          <div className="primary-model-copy">
-            <strong>{m.label}</strong>
-            <span>{m.blurb}</span>
-          </div>
-          {value === m.id && <IconCheck size={16} className="primary-check" />}
+        <button key={m.id} className={`simple-model-row ${value === m.id ? "selected" : ""}`} onClick={() => onPick(m.id)}>
+          <span className="simple-model-icon"><BrandMark brand={brandFor(m.engine)} size={16} /></span>
+          <strong>{m.label}</strong>
+          {value === m.id && <IconCheck size={15} />}
         </button>
       ))}
       <div className="menu-divider" />
-      <button className={`menu-drill ${panel === "effort" ? "active" : ""}`} onClick={() => setPanel(panel === "effort" ? null : "effort")}>
-        <span>Effort</span><strong>{effortLabel(effort)}</strong><IconChevron size={14} />
+      <button
+        className={`menu-drill ${showMore ? "active" : ""}`}
+        onMouseEnter={() => setShowMore(true)}
+        onFocus={() => setShowMore(true)}
+        onClick={() => setShowMore((current) => !current)}
+      >
+        <span>More models</span><strong>{moreModels.length}</strong><IconChevron size={14} />
       </button>
-      <button className={`menu-drill ${panel === "models" ? "active" : ""}`} onClick={() => setPanel(panel === "models" ? null : "models")}>
-        <span>More models</span><strong>{models.length}</strong><IconChevron size={14} />
-      </button>
-      {panel === "effort" && (
-        <div className="menu-subpanel effort-subpanel">
-          <div className="subpanel-mobile-head"><button onClick={() => setPanel(null)} aria-label="Back"><IconChevron size={16} /></button><strong>Reasoning effort</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
-          <div className="effort-slider-card">
-            <div className="effort-slider-head">
-              <span>Reasoning effort</span>
-              <strong>{effortLabel(effort)}</strong>
-            </div>
-            <div className="effort-slider-wrap" style={{ "--effort-progress": `${effortIndex * 20}%` } as any}>
-              <input
-                type="range"
-                min="0"
-                max="5"
-                step="1"
-                value={effortIndex}
-                aria-label="Reasoning effort"
-                aria-valuetext={effortLabel(effort)}
-                onChange={(event) => onEffort(effortLevels[Number(event.target.value)])}
-              />
-              <div className="effort-ticks" aria-hidden="true">{effortLevels.map((level) => <i key={level} />)}</div>
-            </div>
-            <p>{effortDescriptions[effort]}</p>
-            <div className="effort-presets">
-              {effortLevels.map((level) => (
-                <button key={level} className={effort === level ? "on" : ""} onClick={() => onEffort(level)}>
-                  {level === "medium" ? "Med" : effortLabel(level)}
-                </button>
-              ))}
-            </div>
-          </div>
+      {showMore && (
+        <div className="menu-subpanel simple-model-submenu" onMouseEnter={() => setShowMore(true)}>
+          <div className="subpanel-mobile-head"><button onClick={() => setShowMore(false)} aria-label="Back"><IconChevron size={16} /></button><strong>More models</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
+          <div className="simple-menu-title">More models <small>{enabled.length} in Auto</small></div>
+          {(moreModels.length ? moreModels : models).map((m) => (
+            <button key={m.id} className={`simple-model-row ${value === m.id ? "selected" : ""}`} onClick={() => onPick(m.id)}>
+              <span className="simple-model-icon"><BrandMark brand={brandFor(m.engine)} size={16} /></span>
+              <strong>{m.label}</strong>
+              {value === m.id && <IconCheck size={15} />}
+            </button>
+          ))}
         </div>
       )}
-      {panel === "models" && (
-        <div className="menu-subpanel models-subpanel">
-          <div className="subpanel-mobile-head"><button onClick={() => setPanel(null)} aria-label="Back"><IconChevron size={16} /></button><strong>Available models</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
-          <div className="subpanel-title"><span>All available models</span><small>{enabled.length} in Auto pool</small></div>
-          <div className="catalog-list">
-            {models.map((m) => (
-              <div key={m.id} className={`catalog-row ${value === m.id ? "selected" : ""} ${enabled.includes(m.id) ? "" : "excluded"}`}>
-                <button className="catalog-pick" onClick={() => onPick(m.id)}>
-                  <span className="catalog-mark"><BrandMark brand={brandFor(m.engine)} size={17} /></span>
-                  <span className="catalog-copy"><strong>{m.label}</strong><small>{CAPABILITY_LABELS[capabilityProfile(m.id).strengths[0]]} · {m.blurb}</small></span>
-                  <em>{m.plan}</em>
-                </button>
-                <button className={`pool-check ${enabled.includes(m.id) ? "on" : ""}`} onClick={() => onToggle(m.id)} title={enabled.includes(m.id) ? "Remove from Auto pool" : "Add to Auto pool"}>
-                  {enabled.includes(m.id) && <IconCheck size={12} />}
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+    </div>
+  );
+}
+
+const EFFORT_LEVELS: Effort[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
+const EFFORT_DESCRIPTIONS: Record<Effort, string> = {
+  low: "Fastest responses",
+  medium: "Balanced speed and depth",
+  high: "Thorough reasoning",
+  xhigh: "Deeper reasoning",
+  max: "Maximum reasoning depth",
+  ultra: "Maximum depth with delegation",
+};
+const effortName = (level: Effort) => level === "xhigh" ? "Extra" : level[0].toUpperCase() + level.slice(1);
+
+function EffortMenu({ value, onPick, onClose }: { value: Effort; onPick: (effort: Effort) => void; onClose: () => void }) {
+  const index = EFFORT_LEVELS.indexOf(value);
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [onClose]);
+  return (
+    <div className="effort-menu">
+      <div className="menu-mobile-head"><span /><strong>Effort</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
+      <div className="effort-menu-head"><span>Effort</span><strong>{effortName(value)}</strong></div>
+      <div className="effort-direction"><span>Faster</span><span>Smarter</span></div>
+      <div className="effort-meter" style={{ "--effort-progress": `${index * 20}%` } as any}>
+        <input
+          type="range"
+          min="0"
+          max="5"
+          step="1"
+          value={index}
+          aria-label="Reasoning effort"
+          aria-valuetext={effortName(value)}
+          onChange={(event) => onPick(EFFORT_LEVELS[Number(event.target.value)])}
+        />
+        <div aria-hidden="true">{EFFORT_LEVELS.map((level, levelIndex) => <i key={level} className={levelIndex === index ? "selected" : ""} />)}</div>
+      </div>
+      <p>{EFFORT_DESCRIPTIONS[value]}</p>
     </div>
   );
 }
