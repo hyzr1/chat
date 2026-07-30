@@ -759,7 +759,7 @@ export function CustomizePanel() {
               <h2>Part of the Hyzr family</h2>
               <p>Every Hyzr product shares one clear identity. The product name changes; the family mark stays familiar.</p>
             </div>
-            <HyzrChatLogo size={38} />
+            <HyzrChatLogo />
           </div>
           <div className="brand-principles">
             <span>Hyzr</span>

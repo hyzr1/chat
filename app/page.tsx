@@ -2909,6 +2909,8 @@ function ModelMenu({
     max: "Maximum reasoning depth",
     ultra: "Maximum depth with task delegation",
   };
+  const effortLevels: Effort[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
+  const effortIndex = effortLevels.indexOf(effort);
   return (
     <div className="menu">
       <div className="menu-mobile-head"><span /><strong>Model &amp; effort</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
@@ -2952,14 +2954,33 @@ function ModelMenu({
       {panel === "effort" && (
         <div className="menu-subpanel effort-subpanel">
           <div className="subpanel-mobile-head"><button onClick={() => setPanel(null)} aria-label="Back"><IconChevron size={16} /></button><strong>Reasoning effort</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
-          <div className="subpanel-intro">Higher effort means more thorough responses, but takes longer and uses your limits faster.</div>
-          {(["low", "medium", "high", "xhigh", "max", "ultra"] as Effort[]).map((level) => (
-            <button key={level} className={`effort-row ${effort === level ? "selected" : ""}`} onClick={() => { onEffort(level); setPanel(null); }}>
-              <span><strong>{effortLabel(level)}</strong><small>{effortDescriptions[level]}</small></span>
-              {level === "high" && <em>Default</em>}
-              {effort === level && <IconCheck size={16} />}
-            </button>
-          ))}
+          <div className="effort-slider-card">
+            <div className="effort-slider-head">
+              <span>Reasoning effort</span>
+              <strong>{effortLabel(effort)}</strong>
+            </div>
+            <div className="effort-slider-wrap" style={{ "--effort-progress": `${effortIndex * 20}%` } as any}>
+              <input
+                type="range"
+                min="0"
+                max="5"
+                step="1"
+                value={effortIndex}
+                aria-label="Reasoning effort"
+                aria-valuetext={effortLabel(effort)}
+                onChange={(event) => onEffort(effortLevels[Number(event.target.value)])}
+              />
+              <div className="effort-ticks" aria-hidden="true">{effortLevels.map((level) => <i key={level} />)}</div>
+            </div>
+            <p>{effortDescriptions[effort]}</p>
+            <div className="effort-presets">
+              {effortLevels.map((level) => (
+                <button key={level} className={effort === level ? "on" : ""} onClick={() => onEffort(level)}>
+                  {level === "medium" ? "Med" : effortLabel(level)}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
       {panel === "models" && (
@@ -3674,7 +3695,7 @@ function SettingsModal({
       case "billing": return <><div className="current-plan"><span>Current plan</span><div><h3>Local Developer</h3><strong>$0</strong></div><p>Owner access to every local Hyzr Chat feature. Your Claude and ChatGPT subscriptions are billed separately by their providers.</p><em><IconCheck size={12} /> Full access</em></div><div className="plan-grid"><div><span>Future</span><h3>Pro</h3><p>Hosted projects, synced history, managed models, and expanded generation.</p><button disabled>Not yet available</button></div><div><span>Future</span><h3>Team</h3><p>Shared workspaces, organization controls, audit logs, and centralized billing.</p><button disabled>Not yet available</button></div></div><div className="settings-callout"><IconKey size={16} /><div><strong>No Hyzr Chat charges</strong><span>This installation has no subscription or payment method. Hosted plans will be opt-in when introduced.</span></div></div></>;
       case "shortcuts": return <SettingSection title="Keyboard shortcuts"><SettingRow title="New chat" description="Choose the global shortcut used to start a fresh project."><StyledSelect value={productPrefs.newChatKey} onChange={(value) => updatePref("newChatKey", value as "k" | "n")} options={[{value:"k",label:"Ctrl / ⌘  K"},{value:"n",label:"Ctrl / ⌘  N"}]} /></SettingRow><SettingRow title="Send message" description="When disabled, Ctrl / ⌘ + Enter sends and Enter creates a new line."><div className="shortcut-toggle"><span>{productPrefs.sendWithEnter ? "Enter" : "Ctrl / ⌘  Enter"}</span><Toggle value={productPrefs.sendWithEnter} onChange={(value) => updatePref("sendWithEnter", value)} /></div></SettingRow><SettingRow title="New line"><kbd>{productPrefs.sendWithEnter ? "Shift  Enter" : "Enter"}</kbd></SettingRow><SettingRow title="Close menu or settings"><kbd>Escape</kbd></SettingRow></SettingSection>;
       case "help": return <><div className="help-grid"><a href="https://developers.openai.com/codex" target="_blank" rel="noreferrer"><IconBook size={18} /><strong>Codex documentation</strong><span>Learn about local coding agents and configuration.</span></a><a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noreferrer"><IconCode size={18} /><strong>Claude Code documentation</strong><span>Learn about Claude’s local development workflow.</span></a><a href="https://help.openai.com" target="_blank" rel="noreferrer"><IconExternal size={18} /><strong>Get provider help</strong><span>Account, subscription, and usage support.</span></a><button onClick={() => window.location.reload()}><IconRefresh size={18} /><strong>Reload Hyzr Chat</strong><span>Refresh the interface without deleting projects.</span></button></div><SettingSection title="Learn more"><SettingRow title="How routing works" description="A fast planner classifies each subtask and selects from your enabled model pool."><button className="setting-button" onClick={() => selectPage("routing")}>Open routing</button></SettingRow><SettingRow title="Usage and limits"><button className="setting-button" onClick={() => selectPage("usage")}>View usage</button></SettingRow></SettingSection></>;
-      case "about": return <><div className="about-mark"><HyzrChatLogo size={40} /><p>One project workspace. The right model for every task.</p><span>Version {PRODUCT.version} · Local pilot build</span></div><SettingSection title="Runtime"><SettingRow title="Data architecture"><span className="setting-value">Local-first</span></SettingRow><SettingRow title="Workspace isolation"><span className="setting-value">Per chat</span></SettingRow><SettingRow title="Live preview"><span className="setting-value">Project dev server</span></SettingRow></SettingSection></>;
+      case "about": return <><div className="about-mark"><HyzrChatLogo /><p>One project workspace. The right model for every task.</p><span>Version {PRODUCT.version} · Local pilot build</span></div><SettingSection title="Runtime"><SettingRow title="Data architecture"><span className="setting-value">Local-first</span></SettingRow><SettingRow title="Workspace isolation"><span className="setting-value">Per chat</span></SettingRow><SettingRow title="Live preview"><span className="setting-value">Project dev server</span></SettingRow></SettingSection></>;
     }
   };
 

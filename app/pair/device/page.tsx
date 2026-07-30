@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { HyzrMark } from "../../hyzr-logo";
 
 type DeviceInfo = {
   code: string;
@@ -109,7 +110,7 @@ export default function DevicePairPage() {
     <main className="device-pair-page">
       <section className="device-pair-card" aria-live="polite">
         <header className="device-pair-brand">
-          <img src="/hyzr-chat-mark.svg?v=2" alt="" />
+          <HyzrMark />
           <span>Hyzr</span>
         </header>
 

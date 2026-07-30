@@ -112,6 +112,30 @@ test("terminal device approval is clear and mobile-safe", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
+test("terminal device approval is centered and uses the canonical mark", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/agent/device/approve?code=ABCD-EFGH", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      code: "ABCD-EFGH",
+      status: "pending",
+      account: { email: "developer@example.test" },
+      agent: {
+        host: "Developer PC", platform: "win32", version: "1.2.3",
+        workspaceRoot: "C:\\Users\\developer\\Hyzr",
+        claude: true, codex: true, git: true, gh: true,
+      },
+    }),
+  }));
+  await page.goto("/pair/device?code=ABCD-EFGH");
+  const cardBox = await page.locator(".device-pair-card").boundingBox();
+  expect(cardBox).not.toBeNull();
+  expect(Math.abs(cardBox!.x + cardBox!.width / 2 - 720)).toBeLessThanOrEqual(1);
+  await expect(page.locator(".device-pair-brand .hyzr-mark img")).toHaveAttribute("src", "/hyzr-chat-mark.svg?v=3");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /hyzr-chat-mark\.svg\?v=3/);
+});
+
 test("hosted computer setup is a compact self-pairing terminal download", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await createTestAccount(page);
@@ -184,6 +208,28 @@ test("opening and closing settings preserves the desktop sidebar", async ({ page
   await page.getByRole("button", { name: "Close settings" }).click();
   await expect(page.locator(".settings-modal")).toHaveCount(0);
   await expect(sidebar).not.toHaveClass(/collapsed/);
+});
+
+test("compact model controls are theme-safe and expose visual effort", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await createTestAccount(page);
+  await page.goto("/");
+  await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
+  await page.locator(".model-picker > button").click();
+  await expect(page.getByText("Choose a model")).toBeVisible();
+  const openAiMark = page.locator(".primary-model-row .brand-openai").first();
+  await expect(openAiMark).toBeVisible();
+  await page.locator("html").evaluate((element) => element.setAttribute("data-theme", "light"));
+  expect(await openAiMark.evaluate((element) => getComputedStyle(element).color)).toBe("rgb(32, 33, 36)");
+  await page.getByRole("button", { name: /^Effort/ }).click();
+  const effortSlider = page.getByRole("slider", { name: "Reasoning effort" });
+  await expect(effortSlider).toBeVisible();
+  await effortSlider.fill("4");
+  await expect(page.locator(".effort-slider-head strong")).toHaveText("Max");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Work intake" }).click();
+  await expect(page.locator(".intake-source-tabs").getByRole("button", { name: "GitHub" }).locator("svg")).toBeVisible();
 });
 
 test("Preview starts a project dev server even before an HTML build exists", async ({ page }) => {

@@ -20,11 +20,10 @@ export const GeminiMark = ({ size = 18 }: B) => (
 );
 
 export type Brand = "openai" | "anthropic" | "google" | "generic";
-export const BRAND_COLOR: Record<Brand, string> = { openai: "#e7e7e7", anthropic: "#d97757", google: "#4285f4", generic: "#9aa0aa" };
 
 export function BrandMark({ brand, size = 18 }: { brand: Brand; size?: number }) {
   const mark = brand === "openai" ? <OpenAIMark size={size} /> : brand === "anthropic" ? <AnthropicMark size={size} /> : brand === "google" ? <GeminiMark size={size} /> : null;
-  return <span style={{ color: BRAND_COLOR[brand], display: "inline-flex" }}>{mark}</span>;
+  return <span className={`brand-mark brand-${brand}`}>{mark}</span>;
 }
 
 export function brandFor(idOrEngine: string): Brand {

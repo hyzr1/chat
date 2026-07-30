@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import GithubPanel from "./GithubPanel";
-import { IconArrowRight, IconLayers, IconSearch, IconSparkles } from "../icons";
+import { IconArrowRight, IconGithub, IconLayers, IconSearch, IconSparkles } from "../icons";
 
 interface LinearIssue {
   id: string;
@@ -48,7 +48,7 @@ export default function WorkIntakePanel({
 
   return <div className="intake-shell">
     <div className="intake-source-tabs">
-      <button className={source === "github" ? "on" : ""} onClick={() => setSource("github")}><span className="github-source-dot" /> GitHub</button>
+      <button className={source === "github" ? "on" : ""} onClick={() => setSource("github")}><IconGithub size={15} /> GitHub</button>
       <button className={source === "linear" ? "on" : ""} onClick={() => setSource("linear")}><span className="linear-source-mark"><IconLayers size={13} /></span> Linear</button>
     </div>
     {source === "github" ? <GithubPanel onUseFile={onUseFile} onUseIssue={onUseGithubIssue} /> : <div className="panel-view"><div className="panel-inner">

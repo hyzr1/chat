@@ -2,18 +2,18 @@ export function HyzrMark({ size = 24, className = "" }: { size?: number; classNa
   return (
     <span
       className={`hyzr-mark ${className}`.trim()}
-      style={{ width: size, height: size, fontSize: Math.max(12, Math.round(size * 0.54)) }}
+      style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      H
+      <img src="/hyzr-chat-mark.svg?v=3" alt="" draggable={false} />
     </span>
   );
 }
 
-export function HyzrChatLogo({ compact = false, size = 28 }: { compact?: boolean; size?: number }) {
+export function HyzrChatLogo({ compact = false }: { compact?: boolean }) {
   return (
     <span className="hyzr-chat-logo" aria-label="Hyzr Chat">
-      <HyzrMark size={size} />
+      <HyzrMark />
       {!compact && <span className="hyzr-chat-wordmark"><b>Hyzr</b><em>Chat</em></span>}
     </span>
   );

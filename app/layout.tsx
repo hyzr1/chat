@@ -18,9 +18,9 @@ export const metadata: Metadata = {
   description: "A multi-model workspace that plans, routes, builds, and verifies software.",
   applicationName: PRODUCT.name,
   icons: {
-    icon: [{ url: "/hyzr-chat-mark.svg?v=2", type: "image/svg+xml" }],
-    shortcut: "/hyzr-chat-mark.svg?v=2",
-    apple: "/hyzr-chat-mark.svg?v=2",
+    icon: [{ url: "/hyzr-chat-mark.svg?v=3", type: "image/svg+xml" }],
+    shortcut: "/hyzr-chat-mark.svg?v=3",
+    apple: "/hyzr-chat-mark.svg?v=3",
   },
 };
 
