@@ -26,9 +26,19 @@ test("explicit provider model wins before prompt heuristics", () => {
 
 test("the bridge forwards commands without injecting preview restrictions", () => {
   const prompt = "Run npm run dev on port 5000 and keep it running.";
-  const transcript = __test.transcript({ prompt, history: [] });
-  assert.equal(transcript, prompt);
-  assert.doesNotMatch(transcript, /Hyzr manages|do not start|persistent\/background/i);
+  const direct = __test.transcript({ prompt, history: [] });
+  assert.equal(direct, prompt);
+  assert.doesNotMatch(direct, /Hyzr manages|do not start|persistent\/background/i);
+  const migrated = __test.transcript({
+    prompt,
+    history: [
+      { role: "assistant", content: "Hyzr manages preview servers itself, so I cannot start it." },
+      { role: "user", content: "Why can't you run the command?" },
+    ],
+  });
+  assert.doesNotMatch(migrated, /Hyzr manages|cannot start it/i);
+  assert.match(migrated, /Why can't you run the command\?/);
+  assert.match(migrated, /Run npm run dev on port 5000/);
 });
 
 test("relay credentials are never sent over remote plaintext HTTP", () => {

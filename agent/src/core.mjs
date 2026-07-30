@@ -200,7 +200,11 @@ function providerModel(engine, requested) {
 }
 
 function transcript(job) {
-  const history = Array.isArray(job.history) ? job.history.slice(-16) : [];
+  const history = (Array.isArray(job.history) ? job.history.slice(-16) : []).filter((message) => {
+    if (message?.role !== "assistant") return true;
+    const content = String(message.content || "");
+    return !/\bHyzr\b[\s\S]{0,100}\b(?:manages|owns)\b[\s\S]{0,80}\b(?:preview|server|process)\b|\bHyzr workspace\b[\s\S]{0,100}\bnot to start\b[\s\S]{0,80}\bserver/i.test(content);
+  });
   if (!history.length) return String(job.prompt);
   return [
     "This is a resumed Hyzr web conversation. Preserve continuity within this workspace.",
