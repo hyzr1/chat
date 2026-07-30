@@ -38,6 +38,7 @@ import {
   IconCode,
   IconShield,
   IconGauge,
+  IconHelpCircle,
   IconRoute,
   IconTrash,
   IconClock,
@@ -2950,14 +2951,6 @@ function ModelMenu({
 }
 
 const EFFORT_LEVELS: Effort[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
-const EFFORT_DESCRIPTIONS: Record<Effort, string> = {
-  low: "Fastest responses",
-  medium: "Balanced speed and depth",
-  high: "Thorough reasoning",
-  xhigh: "Deeper reasoning",
-  max: "Maximum reasoning depth",
-  ultra: "Maximum depth with delegation",
-};
 const effortName = (level: Effort) => level === "xhigh" ? "Extra" : level[0].toUpperCase() + level.slice(1);
 
 function EffortMenu({ value, onPick, onClose }: { value: Effort; onPick: (effort: Effort) => void; onClose: () => void }) {
@@ -2972,7 +2965,13 @@ function EffortMenu({ value, onPick, onClose }: { value: Effort; onPick: (effort
   return (
     <div className="effort-menu">
       <div className="menu-mobile-head"><span /><strong>Effort</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
-      <div className="effort-menu-head"><span>Effort</span><strong>{effortName(value)}</strong></div>
+      <div className="effort-menu-head">
+        <span>Effort</span>
+        <strong>{effortName(value)}</strong>
+        <span className="effort-help" title="Higher effort gives the model more time to reason.">
+          <IconHelpCircle size={17} />
+        </span>
+      </div>
       <div className="effort-direction"><span>Faster</span><span>Smarter</span></div>
       <div className="effort-meter" style={{ "--effort-progress": `${index * 20}%` } as any}>
         <input
@@ -2987,7 +2986,6 @@ function EffortMenu({ value, onPick, onClose }: { value: Effort; onPick: (effort
         />
         <div aria-hidden="true">{EFFORT_LEVELS.map((level, levelIndex) => <i key={level} className={levelIndex === index ? "selected" : ""} />)}</div>
       </div>
-      <p>{EFFORT_DESCRIPTIONS[value]}</p>
     </div>
   );
 }
