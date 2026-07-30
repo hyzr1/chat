@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { kvGet } from "@/lib/relay-store";
-import { cleanWorkspaceId, type AgentRunJob } from "@/lib/agent-protocol";
+import { AGENT_ONLINE_WINDOW_MS, cleanWorkspaceId, type AgentRunJob } from "@/lib/agent-protocol";
 import { enqueueAgentJob, pairedAgent } from "@/lib/paired-agent";
 import { authUser } from "@/lib/auth";
 
@@ -19,8 +19,8 @@ export async function POST(request: NextRequest) {
   if (!token) return NextResponse.json({ error: "No agent is paired.", reason: "unpaired" }, { status: 404 });
   const record = await kvGet<{ lastSeen: number; agent?: { protocol?: number } }>(`agent:${token}`);
   // If the agent hasn't polled recently it's offline — tell the UI to reconnect.
-  if (record && Date.now() - Number(record.lastSeen || 0) > 90_000) {
-    return NextResponse.json({ error: "Your agent went offline. Restart it, then try again.", reason: "offline" }, { status: 410 });
+  if (record && Date.now() - Number(record.lastSeen || 0) > AGENT_ONLINE_WINDOW_MS) {
+    return NextResponse.json({ error: "Hyzr is offline. Reopen hyzr.cmd on your computer, then try again.", reason: "offline" }, { status: 410 });
   }
   if (Number(record?.agent?.protocol || 1) < 2) {
     return NextResponse.json({

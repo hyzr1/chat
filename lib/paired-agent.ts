@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import type { AgentCapabilities, AgentJob, AgentResultEvent, AgentRpcMethod } from "./agent-protocol";
 import { kvGet, kvSet, queuePush, queueRange } from "./relay-store";
 import { authUser } from "./auth";
-import { isHostedRuntime } from "./agent-protocol";
+import { AGENT_ONLINE_WINDOW_MS, isHostedRuntime } from "./agent-protocol";
 
 export const AGENT_COOKIE = "hyzr_agent_pair";
 
@@ -27,7 +27,7 @@ export async function pairedAgent(request: NextRequest) {
   return {
     code,
     token,
-    online: Date.now() - Number(record.lastSeen || 0) < 90_000,
+    online: Date.now() - Number(record.lastSeen || 0) < AGENT_ONLINE_WINDOW_MS,
     agent: record.agent,
     fingerprint: tokenFingerprint(token),
   };

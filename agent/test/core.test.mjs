@@ -36,6 +36,20 @@ test("preview selection prefers built output and then shallow index", () => {
   ]), "dist/index.html");
 });
 
+test("preview discovery recognizes declared and framework dev ports", () => {
+  assert.equal(__test.previewPortFor({ hyzr: { previewPort: 4567 } }, "next dev"), 4567);
+  assert.equal(__test.previewPortFor({}, "vite --port 5199"), 5199);
+  assert.equal(__test.previewPortFor({}, "next dev"), 3000);
+  assert.equal(__test.previewPortFor({}, "vite"), 5173);
+  assert.equal(__test.previewPortFor({}, "node server.js"), null);
+});
+
+test("Claude text after tool work starts a readable paragraph", () => {
+  assert.equal(__test.streamSeparator("Let me create it now."), "\n\n");
+  assert.equal(__test.streamSeparator("Already separated.\n\n"), "");
+  assert.equal(__test.streamSeparator(""), "");
+});
+
 test("broad product work becomes a bounded mixed-provider specialist graph", () => {
   const plan = __test.specialistPlan({
     plan: true,

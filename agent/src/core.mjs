@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 2;
-const VERSION = "1.1.0";
+const VERSION = "1.1.1";
 const IS_WIN = process.platform === "win32";
 const DEFAULT_ROOT = path.join(os.homedir(), "Hyzr");
 const STATE_ROOT = path.join(os.homedir(), ".hyzr", "agent");
@@ -16,10 +16,40 @@ const CONFIG_FILE = path.join(STATE_ROOT, "config.json");
 const SESSIONS_FILE = path.join(STATE_ROOT, "sessions.json");
 const IGNORE = new Set(["node_modules", ".git", ".next", ".cache"]);
 const previewServers = new Map();
+const PREVIEW_SERVER_LIMIT = 2;
+const PREVIEW_IDLE_MS = 30 * 60 * 1000;
 
 const log = (...values) => console.log("[hyzr]", ...values);
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const cleanId = (value) => String(value || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+
+function stopPreviewRecord(id, record) {
+  if (record?.child && !record.child.killed) {
+    try {
+      if (IS_WIN && record.child.pid) {
+        spawnSync("taskkill.exe", ["/pid", String(record.child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+      } else if (record.child.pid) {
+        process.kill(-record.child.pid, "SIGTERM");
+      } else {
+        record.child.kill();
+      }
+    } catch {
+      try { record.child.kill(); } catch {}
+    }
+  }
+  previewServers.delete(id);
+}
+
+function sweepPreviewServers(force = false) {
+  const cutoff = Date.now() - PREVIEW_IDLE_MS;
+  for (const [id, record] of previewServers) {
+    if (force || Number(record.lastUsed || record.startedAt || 0) < cutoff) stopPreviewRecord(id, record);
+  }
+}
+
+const previewSweep = setInterval(() => sweepPreviewServers(false), 5 * 60 * 1000);
+previewSweep.unref?.();
+process.once("exit", () => sweepPreviewServers(true));
 
 function cleanRelay(value) {
   const url = new URL(String(value || "https://chat.hyzr.ai"));
@@ -230,20 +260,32 @@ async function runClaude({ command, job, cwd, priorSession, permissionMode, emit
   let sessionId = priorSession || "";
   let answer = "";
   let sawPartial = false;
+  let separateNextTextBlock = false;
   let resultError = "";
   const processResult = await runProcess(command, args, priorSession ? String(job.prompt) : transcript(job), cwd, (line) => {
     let event;
     try { event = JSON.parse(line); } catch { return; }
     if (event.session_id) sessionId = event.session_id;
     if (event.type === "system" && event.subtype === "init" && event.session_id) sessionId = event.session_id;
+    if (event.type === "stream_event" && event.event?.type === "content_block_start" && event.event.content_block?.type === "tool_use") {
+      separateNextTextBlock = Boolean(answer);
+    }
     if (event.type === "stream_event" && event.event?.type === "content_block_delta" && event.event.delta?.type === "text_delta") {
       sawPartial = true;
-      answer += event.event.delta.text || "";
-      emit("text", event.event.delta.text || "");
+      const delta = event.event.delta.text || "";
+      if (delta && separateNextTextBlock) {
+        const separator = streamSeparator(answer);
+        answer += separator;
+        if (separator) emit("text", separator);
+        separateNextTextBlock = false;
+      }
+      answer += delta;
+      emit("text", delta);
     }
     if (event.type === "assistant" && Array.isArray(event.message?.content)) {
       for (const content of event.message.content) {
         if (content?.type === "tool_use") {
+          separateNextTextBlock = Boolean(answer);
           const text = claudeActivity(content);
           if (text) emit("status", text, { tool: content.name });
         }
@@ -260,6 +302,11 @@ async function runClaude({ command, job, cwd, priorSession, permissionMode, emit
   });
   if (processResult.code !== 0 || resultError) throw new Error(resultError || processResult.stderr.trim() || `Claude exited with code ${processResult.code}.`);
   return { sessionId, answer };
+}
+
+function streamSeparator(previous) {
+  if (!previous || /\n\s*\n$/.test(previous)) return "";
+  return "\n\n";
 }
 
 async function runCodex({ command, job, cwd, priorSession, permissionMode, emit }) {
@@ -348,42 +395,88 @@ async function walkWorkspace(directory, relative = "", depth = 0, output = []) {
 
 async function startPreviewServer(context, workspaceId) {
   const workspace = safeWorkspace(context.workspaceRoot, workspaceId);
-  const existing = previewServers.get(cleanId(workspaceId));
-  if (existing?.child && !existing.child.killed) return { port: existing.port, reused: true };
+  const id = cleanId(workspaceId);
+  const existing = previewServers.get(id);
+  if (existing) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${existing.port}/`, { signal: AbortSignal.timeout(1200) });
+      if (response.status < 500) {
+        existing.lastUsed = Date.now();
+        return { port: existing.port, reused: true, attached: Boolean(existing.attached) };
+      }
+    } catch {}
+    stopPreviewRecord(id, existing);
+  }
   const packageFile = safeRelative(workspace, "package.json");
   let manifest;
   try { manifest = JSON.parse(await readFile(packageFile, "utf8")); } catch { throw new Error("This project has no package.json dev server."); }
   const script = manifest?.scripts?.dev ? "dev" : manifest?.scripts?.start ? "start" : "";
   if (!script) throw new Error("Add a dev or start script to package.json before opening a live preview.");
+  const scriptCommand = String(manifest.scripts[script] || "");
+  const declaredPort = previewPortFor(manifest, scriptCommand);
+  if (declaredPort) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${declaredPort}/`, { signal: AbortSignal.timeout(1500) });
+      if (response.status < 500) {
+        previewServers.set(id, { child: null, port: declaredPort, workspace, startedAt: Date.now(), lastUsed: Date.now(), attached: true });
+        return { port: declaredPort, reused: true, attached: true };
+      }
+    } catch {}
+  }
   const npm = context.tools.npm;
   if (!npm) throw new Error("Node.js/npm is not available to start this project.");
+  if (previewServers.size >= PREVIEW_SERVER_LIMIT) {
+    const oldest = [...previewServers.entries()].sort((a, b) =>
+      Number(a[1].lastUsed || a[1].startedAt || 0) - Number(b[1].lastUsed || b[1].startedAt || 0),
+    )[0];
+    if (oldest) stopPreviewRecord(oldest[0], oldest[1]);
+  }
   const port = 43100 + Math.floor(Math.random() * 90);
   const launch = commandLaunch(npm, ["run", script, "--", "--port", String(port)]);
   const child = spawn(launch.command, launch.args, {
     cwd: workspace,
     windowsHide: true,
     windowsVerbatimArguments: launch.windowsVerbatimArguments,
-    detached: false,
-    env: { ...process.env, BROWSER: "none", PORT: String(port), HOST: "127.0.0.1", NO_COLOR: "1" },
+    detached: !IS_WIN,
+    env: {
+      ...process.env,
+      BROWSER: "none",
+      PORT: String(port),
+      HOST: "127.0.0.1",
+      NO_COLOR: "1",
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --max-old-space-size=768`.trim(),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
   child.stdout?.on("data", (chunk) => { output = `${output}${chunk}`.slice(-12_000); });
   child.stderr?.on("data", (chunk) => { output = `${output}${chunk}`.slice(-12_000); });
-  child.once("close", () => previewServers.delete(cleanId(workspaceId)));
-  previewServers.set(cleanId(workspaceId), { child, port, workspace, startedAt: Date.now() });
+  child.once("close", () => previewServers.delete(id));
+  previewServers.set(id, { child, port, workspace, startedAt: Date.now(), lastUsed: Date.now(), attached: false });
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode != null) throw new Error(output.trim() || `The ${script} script exited with code ${child.exitCode}.`);
     try {
       const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1200) });
-      if (response.status < 500) return { port, reused: false };
+      if (response.status < 500) return { port, reused: false, attached: false };
     } catch {}
     await sleep(350);
   }
-  try { child.kill(); } catch {}
-  previewServers.delete(cleanId(workspaceId));
+  stopPreviewRecord(id, previewServers.get(id));
   throw new Error(`The project server did not become ready on port ${port}.\n${output.trim()}`.trim());
+}
+
+function previewPortFor(manifest, script = "") {
+  const configured = Number(manifest?.hyzr?.previewPort);
+  if (Number.isInteger(configured) && configured >= 1024 && configured <= 65535) return configured;
+  const explicit = String(script).match(/(?:--port(?:=|\s+)|(?:^|\s)-p(?:=|\s+)|\bPORT=)(\d{4,5})\b/i);
+  if (explicit) return Number(explicit[1]);
+  if (/\bvite\b/i.test(script)) return 5173;
+  if (/\bastro\b/i.test(script)) return 4321;
+  if (/\bng\s+serve\b|\bng\b.*\bserve\b/i.test(script)) return 4200;
+  if (/\bvue-cli-service\s+serve\b/i.test(script)) return 8080;
+  if (/\b(next|react-scripts|remix)\b/i.test(script)) return 3000;
+  return null;
 }
 
 function previewEntry(files) {
@@ -514,8 +607,9 @@ async function handleRpc(job, context) {
     case "preview.http": {
       const id = cleanId(params.workspaceId);
       const record = previewServers.get(id);
-      if (!record?.child || record.child.killed) await startPreviewServer(context, id);
+      if (!record || (record.child && record.child.killed)) await startPreviewServer(context, id);
       const active = previewServers.get(id);
+      active.lastUsed = Date.now();
       const requested = String(params.path || "/");
       if (!requested.startsWith("/") || requested.startsWith("//")) throw new Error("Invalid preview URL.");
       const response = await fetch(`http://127.0.0.1:${active.port}${requested}`, {
@@ -661,6 +755,7 @@ export async function startAgent(options = {}) {
   const persisted = { relay, token, workspaceRoot, permissionMode, pairedAt: Date.now() };
   if (options.persistConfig) await options.persistConfig(persisted);
   else await writeJson(CONFIG_FILE, persisted);
+  options.onToken?.(token);
 
   let writeChain = Promise.resolve();
   const emit = (jobId, type, text = "", data) => {
@@ -747,31 +842,62 @@ export async function runAgentCli() {
   console.log("");
 
   let announced = false;
-  await startAgent({
-    relay,
-    code,
-    workspaceRoot,
-    permissionMode,
-    onStatus(status) {
-      if (status.connected && !announced) {
-        announced = true;
-        const available = [
-          status.capabilities.claude && "Claude",
-          status.capabilities.codex && "Codex",
-          status.capabilities.git && "Git",
-          status.capabilities.gh && "GitHub",
-        ].filter(Boolean).join(" · ");
-        console.log(`  Connected${available ? ` — ${available}` : ""}`);
-        console.log("");
-      } else if (!status.connected && status.error) {
-        console.log(`  Reconnecting — ${status.error}`);
-      }
-    },
-  });
+  let activeToken = "";
+  let stopping = false;
+  const controller = new AbortController();
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    controller.abort();
+    sweepPreviewServers(true);
+    if (activeToken) {
+      try {
+        await fetch(`${cleanRelay(relay)}/api/agent/disconnect`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: activeToken }),
+          signal: AbortSignal.timeout(1500),
+        });
+      } catch {}
+    }
+    process.exit(0);
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  process.once("SIGHUP", stop);
+  try {
+    await startAgent({
+      relay,
+      code,
+      workspaceRoot,
+      permissionMode,
+      signal: controller.signal,
+      onToken(token) { activeToken = token; },
+      onStatus(status) {
+        if (status.connected && !announced) {
+          announced = true;
+          const available = [
+            status.capabilities.claude && "Claude",
+            status.capabilities.codex && "Codex",
+            status.capabilities.git && "Git",
+            status.capabilities.gh && "GitHub",
+          ].filter(Boolean).join(" · ");
+          console.log(`  Connected${available ? ` — ${available}` : ""}`);
+          console.log("");
+        } else if (!status.connected && status.error) {
+          console.log(`  Reconnecting — ${status.error}`);
+        }
+      },
+    });
+  } finally {
+    process.removeListener("SIGINT", stop);
+    process.removeListener("SIGTERM", stop);
+    process.removeListener("SIGHUP", stop);
+  }
 }
 
 export async function loadAgentConfig() {
   return readJson(CONFIG_FILE, {});
 }
 
-export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, previewEntry, specialistPlan };
+export const __test = { cleanId, cleanRelay, safeWorkspace, safeRelative, selectExecutable, cmdQuote, engineFor, providerModel, previewEntry, previewPortFor, streamSeparator, specialistPlan };

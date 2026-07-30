@@ -1,10 +1,15 @@
 import { expect, test } from "@playwright/test";
 
 async function createTestAccount(page: import("@playwright/test").Page) {
-  const nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const response = await page.request.post("/api/auth/signup", {
-    data: { email: `browser-${nonce}@example.test`, password: `hyzr-browser-${nonce}` },
-  });
+  const credentials = {
+    email: "hyzr-playwright@example.test",
+    password: "hyzr-playwright-password",
+  };
+  let response = await page.request.post("/api/auth/login", { data: credentials });
+  if (response.ok()) return;
+  response = await page.request.post("/api/auth/signup", { data: credentials });
+  if (response.ok()) return;
+  response = await page.request.post("/api/auth/login", { data: credentials });
   expect(response.ok()).toBeTruthy();
 }
 
@@ -116,6 +121,106 @@ test("hosted computer setup is a compact terminal download and code", async ({ p
   expect(box).not.toBeNull();
   expect(box!.width).toBeLessThanOrEqual(390);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
+test("a known offline computer asks to reopen Hyzr instead of pairing again", async ({ page }) => {
+  await createTestAccount(page);
+  await page.route("**/api/setup", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      hosted: true,
+      agentConnected: false,
+      ready: false,
+      agent: {
+        host: "My PC",
+        platform: "win32",
+        version: "1.1.1",
+        node: "v24",
+        claude: true,
+        codex: true,
+        git: true,
+        gh: true,
+        engine: "claude+codex",
+        workspaceRoot: "C:\\Users\\developer\\Hyzr",
+      },
+    }),
+  }));
+  await page.goto("/");
+  await page.locator("button.top-download").click();
+  await expect(page.getByText("My PC is offline")).toBeVisible();
+  await expect(page.getByText("Reopen Hyzr on your computer")).toBeVisible();
+  await expect(page.getByText(/there is no code to enter again/i)).toBeVisible();
+  await expect(page.locator(".pair-code")).toHaveCount(0);
+});
+
+test("opening and closing settings preserves the desktop sidebar", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 820 });
+  await createTestAccount(page);
+  await page.goto("/");
+  const sidebar = page.locator(".sidebar");
+  await expect(sidebar).not.toHaveClass(/collapsed/);
+  await page.locator(".side-account").click();
+  await expect(page.locator(".settings-modal")).toBeVisible();
+  await expect(sidebar).not.toHaveClass(/collapsed/);
+  const aboutMark = page.getByRole("button", { name: /About Hyzr Chat/ }).locator(".hyzr-mark");
+  const markBox = await aboutMark.boundingBox();
+  expect(markBox).not.toBeNull();
+  expect(markBox!.width).toBeLessThanOrEqual(18);
+  await page.getByRole("button", { name: "Close settings" }).click();
+  await expect(page.locator(".settings-modal")).toHaveCount(0);
+  await expect(sidebar).not.toHaveClass(/collapsed/);
+});
+
+test("Preview starts a project dev server even before an HTML build exists", async ({ page }) => {
+  await createTestAccount(page);
+  const agent = {
+    host: "Preview PC",
+    platform: "win32",
+    version: "1.1.1",
+    node: "v24",
+    claude: true,
+    codex: true,
+    git: true,
+    gh: true,
+    engine: "claude+codex",
+    workspaceRoot: "C:\\Users\\developer\\Hyzr",
+  };
+  await page.route("**/api/setup", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ hosted: true, agentConnected: true, ready: true, agent }),
+  }));
+  await page.route("**/api/agent/enqueue", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ ok: true, jobId: "preview-run" }),
+  }));
+  await page.route("**/api/agent/events**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ events: [{ type: "done" }], cursor: 1 }),
+  }));
+  await page.route("**/api/followups", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ followups: [] }),
+  }));
+  await page.route("**/api/workspace**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ files: [{ name: "package.json", path: "package.json", type: "file", size: 180 }], entry: null, count: 1 }),
+  }));
+  await page.route("**/api/preview-server", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ url: "/preview/_dev/preview-project/", localPort: 5173, proxied: true }),
+  }));
+  await page.goto("/");
+  await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
+  await page.locator("textarea").fill("Create a Next.js portfolio");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("iframe.preview-frame")).toHaveAttribute("src", /\/preview\/_dev\/preview-project\/\?n=/);
 });
 
 test("evaluation lab runs free audits and gates paid comparisons", async ({ page }) => {

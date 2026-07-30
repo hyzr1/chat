@@ -1,4 +1,5 @@
 export const AGENT_PROTOCOL_VERSION = 2;
+export const AGENT_ONLINE_WINDOW_MS = 25_000;
 
 export type AgentEngine = "claude" | "codex";
 export type AgentPermissionMode = "workspace" | "full-access";

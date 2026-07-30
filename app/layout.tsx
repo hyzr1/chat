@@ -17,7 +17,11 @@ export const metadata: Metadata = {
   title: PRODUCT.name,
   description: "A multi-model workspace that plans, routes, builds, and verifies software.",
   applicationName: PRODUCT.name,
-  icons: { icon: "/hyzr-chat-mark.svg" },
+  icons: {
+    icon: [{ url: "/hyzr-chat-mark.svg?v=2", type: "image/svg+xml" }],
+    shortcut: "/hyzr-chat-mark.svg?v=2",
+    apple: "/hyzr-chat-mark.svg?v=2",
+  },
 };
 
 export default function RootLayout({

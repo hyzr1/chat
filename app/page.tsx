@@ -20,7 +20,7 @@ import {
   syncSpacesFromServer,
 } from "./components/Panels";
 import { BrandMark, brandFor } from "./brand-icons";
-import { HyzrMark } from "./hyzr-logo";
+import { HyzrChatLogo, HyzrMark } from "./hyzr-logo";
 import { PRODUCT } from "@/lib/product";
 import { storeGet, storeSet } from "@/lib/client-store";
 import { DEFAULT_ROUTING_RULES, type RoutingRules } from "@/lib/local-router";
@@ -626,6 +626,7 @@ export default function Home() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewEntry, setPreviewEntry] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewStarting, setPreviewStarting] = useState(false);
   const [previewNonce, setPreviewNonce] = useState(0);
   const [previewWidth, setPreviewWidth] = useState(560);
   const [modelPool, setModelPool] = useState<Record<Mode, string[]>>({
@@ -945,26 +946,40 @@ export default function Home() {
 
   useEffect(() => { if (!showPair) stopPairPoll(); return () => stopPairPoll(); }, [showPair]);
 
-  // Detect hosted mode and restore a previously paired agent (verify it's
-  // still alive before trusting the saved code).
+  // Detect hosted mode. Account-scoped presence, rather than the old one-time
+  // code, is the source of truth for whether the terminal is actually online.
   useEffect(() => {
     let live = true;
     fetch("/api/setup", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((info) => {
-      if (live && info) setHosted(Boolean(info.hosted));
+      if (!live || !info) return;
+      setHosted(Boolean(info.hosted));
+      if (info.hosted) {
+        setAgentPaired(Boolean(info.agentConnected));
+        setAgentInfo(info.agent || null);
+      }
     }).catch(() => {});
-    let saved = "";
-    try { saved = localStorage.getItem("hyzr.chat.agentCode") || ""; } catch {}
-    if (saved) {
-      fetch(`/api/agent/status?code=${encodeURIComponent(saved)}`, { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((s) => {
-          if (!live) return;
-          if (s?.status === "paired") { setPairCode(saved); setAgentPaired(true); setAgentInfo(s.agent); }
-          else { try { localStorage.removeItem("hyzr.chat.agentCode"); } catch {} }
-        }).catch(() => {});
-    }
     return () => { live = false; };
   }, []);
+
+  // While the Agent surface or connection sheet is open, keep presence honest.
+  // A closed terminal becomes offline after two bounded poll cycles.
+  useEffect(() => {
+    if (!signedIn || (workMode !== "code" && !showPair)) return;
+    let live = true;
+    const refresh = () => fetch("/api/setup", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((info) => {
+        if (!live || !info?.hosted) return;
+        setHosted(true);
+        setAgentPaired(Boolean(info.agentConnected));
+        setAgentInfo(info.agent || null);
+        if (showPair) setPairInfo(info);
+      })
+      .catch(() => {});
+    void refresh();
+    const timer = window.setInterval(refresh, 8_000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [signedIn, workMode, showPair]);
 
   // Agent is a signed-in feature; a guest (or a sign-out) can never sit in it.
   useEffect(() => {
@@ -1130,11 +1145,11 @@ export default function Home() {
         if (!info) return;
         setPairInfo(info);
         setHosted(Boolean(info.hosted));
-        if (info.hosted && info.agentConnected && info.agent) {
-          setAgentPaired(true);
-          setAgentInfo(info.agent);
-        } else if (info.hosted && !agentPaired) {
-          startHostedPairing();
+        if (info.hosted) {
+          setAgentPaired(Boolean(info.agentConnected));
+          setAgentInfo(info.agent || null);
+          if (!info.agent) startHostedPairing();
+          else stopPairPoll();
         }
       })
       .catch(() => {})
@@ -1404,8 +1419,10 @@ export default function Home() {
         }
         return copy;
       });
-      if (!pairCode || !agentPaired) {
-        applyRelay("Connect your computer first — download the tiny Hyzr terminal launcher and enter the code it asks for.", false);
+      if (!agentPaired) {
+        applyRelay(agentInfo
+          ? "Hyzr is offline. Reopen **hyzr.cmd** on your computer and leave the terminal open."
+          : "Connect your computer first — download the tiny Hyzr terminal launcher and enter the code it asks for.", false);
         setBusy(false); busyRef.current = false; openPair();
         return;
       }
@@ -1435,8 +1452,7 @@ export default function Home() {
           applyRelay(enqJson.error || "Could not reach your paired agent.", false);
           if (["offline", "unpaired", "upgrade_required"].includes(enqJson.reason)) {
             setAgentPaired(false);
-            try { localStorage.removeItem("hyzr.chat.agentCode"); } catch {}
-            if (enqJson.reason === "upgrade_required") openPair();
+            openPair();
           }
           setBusy(false); busyRef.current = false;
           return;
@@ -1457,7 +1473,7 @@ export default function Home() {
             if (done) break;
           }
           if (Date.now() - started > 10 * 60 * 1000) { ans += "\n\n_(Timed out waiting for the agent.)_"; break; }
-          await new Promise((r) => setTimeout(r, 600));
+          await new Promise((r) => setTimeout(r, 35));
         }
         applyRelay(ans || "The agent returned no output.", false);
       } catch (e: any) {
@@ -1834,31 +1850,59 @@ export default function Home() {
   }
 
   // If the agent built a previewable app in the workspace, open it split-screen.
-  async function checkPreview(sessionId = currentId, delay = 600, forceReload = false): Promise<boolean> {
+  async function checkPreview(sessionId = currentId, delay = 600, forceReload = false, reportFailure = false): Promise<boolean> {
     try {
       if (sessionId && previewDismissedRef.current.has(sessionId)) return false;
       if (delay) await new Promise((r) => setTimeout(r, delay));
       if (sessionId && previewDismissedRef.current.has(sessionId)) return false;
-      const w = await fetch(`/api/workspace?session=${encodeURIComponent(sessionId ?? "")}`).then((r) => r.json());
-      if (w.entry) {
-        try {
-          const serverResponse = await fetch("/api/preview-server", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionId }),
-          });
-          const server = await serverResponse.json();
-          if (serverResponse.ok && server.url) setPreviewUrl(server.url);
-        } catch {}
+      const workspaceResponse = await fetch(`/api/workspace?session=${encodeURIComponent(sessionId ?? "")}`, { cache: "no-store" });
+      const w = await workspaceResponse.json();
+      if (!workspaceResponse.ok) {
+        if (reportFailure) setToast(w.error || "Could not inspect this project");
+        return false;
+      }
+      const hasProjectServer = Array.isArray(w.files) && w.files.some((file: { type?: string; path?: string }) =>
+        file.type === "file" && file.path === "package.json",
+      );
+      if (w.entry || hasProjectServer) {
+        let liveUrl: string | null = null;
+        let serverError = "";
+        if (hasProjectServer) {
+          try {
+            const serverResponse = await fetch("/api/preview-server", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sessionId }),
+            });
+            const server = await serverResponse.json();
+            if (serverResponse.ok && server.url) {
+              liveUrl = server.url;
+              setPreviewUrl(server.url);
+            } else {
+              serverError = server.error || "The project dev server could not start";
+            }
+          } catch (error: any) {
+            serverError = error?.message || "The project dev server could not start";
+          }
+        } else {
+          setPreviewUrl(null);
+        }
+        if (!w.entry && !liveUrl) {
+          if (reportFailure) setToast(serverError || "This project does not have a previewable page yet");
+          return false;
+        }
         if (sessionId && previewDismissedRef.current.has(sessionId)) return false;
         setPreviewEntry((previous) => {
-          if (forceReload || previous !== w.entry) setPreviewNonce((n) => n + 1);
-          return w.entry;
+          const nextEntry = w.entry || "dev-server";
+          if (forceReload || previous !== nextEntry) setPreviewNonce((n) => n + 1);
+          return nextEntry;
         });
         setPreviewOpen(true);
         return true;
       }
-    } catch {}
+    } catch (error: any) {
+      if (reportFailure) setToast(error?.message || "Could not open this preview");
+    }
     return false;
   }
   async function showPreview() {
@@ -1867,8 +1911,10 @@ export default function Home() {
       return;
     }
     previewDismissedRef.current.delete(currentId);
-    const found = await checkPreview(currentId, 0, false);
-    if (!found) setToast("No previewable HTML has been created in this chat yet");
+    setPreviewStarting(true);
+    const found = await checkPreview(currentId, 0, false, true);
+    setPreviewStarting(false);
+    if (!found) setToast((current) => current || "No previewable app has been created in this project yet");
   }
   function regenerate() {
     if (busy) return;
@@ -2239,7 +2285,7 @@ export default function Home() {
 
         <div className="side-bottom">
           {signedIn ? (
-            <button className="side-account" onClick={() => { setCollapsed(true); setShowSettings(true); }}>
+            <button className="side-account" onClick={() => { if (isMobileViewport()) setCollapsed(true); setShowSettings(true); }}>
               <span className="side-avatar">{(account?.name?.[0] ?? "Y").toUpperCase()}</span>
               <span className="side-account-name">{account?.name ?? "You"}</span>
               <IconSliders size={15} />
@@ -2287,8 +2333,8 @@ export default function Home() {
             </button>
           )}
           {workMode === "code" && currentId && !previewOpen && (
-            <button className="icon-btn" onClick={showPreview}>
-              <IconEye size={15} /> Preview
+            <button className="icon-btn" onClick={showPreview} disabled={previewStarting}>
+              {previewStarting ? <span className="spinner" /> : <IconEye size={15} />} {previewStarting ? "Starting…" : "Preview"}
             </button>
           )}
           {workMode === "code" && <div className="mode-toggle compact" aria-label="Execution source">
@@ -2502,6 +2548,7 @@ export default function Home() {
       {showPair && (() => {
         const p = pairInfo;
         const connected = Boolean(p && !p.hosted && (p.claude?.available || p.codex?.available));
+        const knownComputer = Boolean(p?.hosted && p.agent);
         const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
         const downloadPlatform = /Macintosh|Mac OS X/i.test(userAgent) ? "mac" : /Linux/i.test(userAgent) ? "linux" : "windows";
         const downloadLabel = downloadPlatform === "windows" ? "Download hyzr.cmd" : "Download hyzr";
@@ -2530,11 +2577,13 @@ export default function Home() {
             </div>
 
             {p?.hosted ? (<>
-              <div className={`pair-status ${agentPaired ? "ready" : "pending"}`}>
+              <div className={`pair-status ${agentPaired ? "ready" : knownComputer ? "offline" : "pending"}`}>
                 <span className="ps-dot" />
                 {agentPaired
                   ? `Connected${agentInfo?.host ? ` to ${agentInfo.host}` : ""}`
-                  : "Waiting for Hyzr to connect"}
+                  : knownComputer
+                    ? `${agentInfo?.host || "Your computer"} is offline`
+                    : "Waiting for Hyzr to connect"}
               </div>
               {agentPaired ? (
                 <div className="pair-connected">
@@ -2545,6 +2594,18 @@ export default function Home() {
                     ["GitHub", agentInfo?.gh],
                   ].map(([label, available]) => <span key={String(label)} className={available ? "on" : ""}><i />{label}</span>)}
                   <code>{agentInfo?.workspaceRoot || "~/Hyzr"}</code>
+                </div>
+              ) : knownComputer ? (
+                <div className="pair-offline">
+                  <span><IconTerminal size={17} /></span>
+                  <div>
+                    <strong>Reopen Hyzr on your computer</strong>
+                    <p>Your pairing is saved. Open <code>{downloadPlatform === "windows" ? "hyzr.cmd" : "hyzr"}</code> and leave the terminal running—there is no code to enter again.</p>
+                  </div>
+                  <div className="pair-offline-actions">
+                    <button onClick={openPair} disabled={pairLoading}>{pairLoading ? "Checking…" : "Check again"}</button>
+                    <a href={`/api/agent/download?platform=${downloadPlatform}`}>Download again</a>
+                  </div>
                 </div>
               ) : (
                 <div className="pair-cli">
@@ -2573,7 +2634,7 @@ export default function Home() {
                   <button className="pair-primary" onClick={() => { setShowPair(false); switchWorkMode("code"); }}>Start building</button>
                 </div>
               )}
-              {!agentPaired && (
+              {!agentPaired && !knownComputer && (
                 <div className="pair-trust">
                   <IconShield size={13} />
                   <span>Only enter this code on your own computer. Hyzr uses your local developer tools and files.</span>
@@ -2826,6 +2887,9 @@ function PreviewPane({
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }
+  const previewSrc = serverUrl
+    ? `${serverUrl}${serverUrl.includes("?") ? "&" : serverUrl.endsWith("/") ? "?" : "/?"}n=${nonce}`
+    : `/preview/_s/${encodeURIComponent(sessionId)}/${entry}?n=${nonce}`;
   return (
     <div className="preview-pane" style={{ width }}>
       <div
@@ -2896,7 +2960,7 @@ function PreviewPane({
         )}
         <iframe
           key={nonce}
-          src={serverUrl ? `${serverUrl}/?n=${nonce}` : `/preview/_s/${encodeURIComponent(sessionId)}/${entry}?n=${nonce}`}
+          src={previewSrc}
           className="preview-frame"
           title="preview"
           style={{ pointerEvents: dragging ? "none" : "auto" }}
@@ -3111,6 +3175,50 @@ function RoutingTree({ msg }: { msg: Msg }) {
   );
 }
 
+function AnimatedMarkdown({ content, streaming }: { content: string; streaming: boolean }) {
+  const [visible, setVisible] = useState(() => streaming ? "" : content);
+  const visibleRef = useRef(visible);
+  const frameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (frameRef.current != null) cancelAnimationFrame(frameRef.current);
+    const reduced = document.documentElement.dataset.motion === "reduced"
+      || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || !content.startsWith(visibleRef.current)) {
+      visibleRef.current = content;
+      setVisible(content);
+      frameRef.current = null;
+      return;
+    }
+    const tick = () => {
+      const remaining = content.length - visibleRef.current.length;
+      if (remaining <= 0) {
+        frameRef.current = null;
+        return;
+      }
+      const divisor = streaming ? 9 : 5;
+      const ceiling = streaming ? 14 : 32;
+      const amount = Math.min(ceiling, Math.max(1, Math.ceil(remaining / divisor)));
+      const next = content.slice(0, visibleRef.current.length + amount);
+      visibleRef.current = next;
+      setVisible(next);
+      frameRef.current = requestAnimationFrame(tick);
+    };
+    frameRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (frameRef.current != null) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    };
+  }, [content, streaming]);
+
+  return (
+    <div className={`stream-copy ${streaming ? "active" : ""}`} aria-live={streaming ? "polite" : undefined}>
+      <Markdown content={visible} />
+      {(streaming || visible.length < content.length) && <span className="cursor" />}
+    </div>
+  );
+}
+
 function MessageView({
   msg,
   onCopy,
@@ -3190,8 +3298,7 @@ function MessageView({
 
       {(msg.content || msg.imageB64) && (
         <div className="bubble">
-          {msg.content && <Markdown content={msg.content} />}
-          {msg.streaming && msg.content && <span className="cursor" />}
+          {msg.content && <AnimatedMarkdown content={msg.content} streaming={Boolean(msg.streaming)} />}
           {msg.imageB64 && (
             <img
               className="gen-image"
@@ -3245,7 +3352,7 @@ const SETTINGS_NAV: { group: string; items: { id: SettingsPage; label: string; i
   ]},
   { group: "Support", items: [
     { id: "shortcuts", label: "Keyboard shortcuts", icon: <IconTerminal size={15} /> }, { id: "help", label: "Help & learn", icon: <IconBook size={15} /> },
-    { id: "about", label: "About Hyzr Chat", icon: <HyzrMark size={14} /> },
+    { id: "about", label: "About Hyzr Chat", icon: <HyzrMark size={16} /> },
   ]},
 ];
 
@@ -3385,12 +3492,12 @@ function SettingsModal({
       case "billing": return <><div className="current-plan"><span>Current plan</span><div><h3>Local Developer</h3><strong>$0</strong></div><p>Owner access to every local Hyzr Chat feature. Your Claude and ChatGPT subscriptions are billed separately by their providers.</p><em><IconCheck size={12} /> Full access</em></div><div className="plan-grid"><div><span>Future</span><h3>Pro</h3><p>Hosted projects, synced history, managed models, and expanded generation.</p><button disabled>Not yet available</button></div><div><span>Future</span><h3>Team</h3><p>Shared workspaces, organization controls, audit logs, and centralized billing.</p><button disabled>Not yet available</button></div></div><div className="settings-callout"><IconKey size={16} /><div><strong>No Hyzr Chat charges</strong><span>This installation has no subscription or payment method. Hosted plans will be opt-in when introduced.</span></div></div></>;
       case "shortcuts": return <SettingSection title="Keyboard shortcuts"><SettingRow title="New chat" description="Choose the global shortcut used to start a fresh project."><StyledSelect value={productPrefs.newChatKey} onChange={(value) => updatePref("newChatKey", value as "k" | "n")} options={[{value:"k",label:"Ctrl / ⌘  K"},{value:"n",label:"Ctrl / ⌘  N"}]} /></SettingRow><SettingRow title="Send message" description="When disabled, Ctrl / ⌘ + Enter sends and Enter creates a new line."><div className="shortcut-toggle"><span>{productPrefs.sendWithEnter ? "Enter" : "Ctrl / ⌘  Enter"}</span><Toggle value={productPrefs.sendWithEnter} onChange={(value) => updatePref("sendWithEnter", value)} /></div></SettingRow><SettingRow title="New line"><kbd>{productPrefs.sendWithEnter ? "Shift  Enter" : "Enter"}</kbd></SettingRow><SettingRow title="Close menu or settings"><kbd>Escape</kbd></SettingRow></SettingSection>;
       case "help": return <><div className="help-grid"><a href="https://developers.openai.com/codex" target="_blank" rel="noreferrer"><IconBook size={18} /><strong>Codex documentation</strong><span>Learn about local coding agents and configuration.</span></a><a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noreferrer"><IconCode size={18} /><strong>Claude Code documentation</strong><span>Learn about Claude’s local development workflow.</span></a><a href="https://help.openai.com" target="_blank" rel="noreferrer"><IconExternal size={18} /><strong>Get provider help</strong><span>Account, subscription, and usage support.</span></a><button onClick={() => window.location.reload()}><IconRefresh size={18} /><strong>Reload Hyzr Chat</strong><span>Refresh the interface without deleting projects.</span></button></div><SettingSection title="Learn more"><SettingRow title="How routing works" description="A fast planner classifies each subtask and selects from your enabled model pool."><button className="setting-button" onClick={() => selectPage("routing")}>Open routing</button></SettingRow><SettingRow title="Usage and limits"><button className="setting-button" onClick={() => selectPage("usage")}>View usage</button></SettingRow></SettingSection></>;
-      case "about": return <><div className="about-mark"><HyzrMark size={36} /><h2>Hyzr Chat</h2><p>One project workspace. The right model for every task.</p><span>Version {PRODUCT.version} · Local pilot build</span></div><SettingSection title="Runtime"><SettingRow title="Data architecture"><span className="setting-value">Local-first</span></SettingRow><SettingRow title="Workspace isolation"><span className="setting-value">Per chat</span></SettingRow><SettingRow title="Preview ports"><span className="setting-value">3001–3099</span></SettingRow></SettingSection></>;
+      case "about": return <><div className="about-mark"><HyzrChatLogo size={40} /><p>One project workspace. The right model for every task.</p><span>Version {PRODUCT.version} · Local pilot build</span></div><SettingSection title="Runtime"><SettingRow title="Data architecture"><span className="setting-value">Local-first</span></SettingRow><SettingRow title="Workspace isolation"><span className="setting-value">Per chat</span></SettingRow><SettingRow title="Live preview"><span className="setting-value">Project dev server</span></SettingRow></SettingSection></>;
     }
   };
 
   return <div className="overlay settings-overlay" onClick={onClose}><div className={`settings-modal ${mobileDetail ? "mobile-detail" : ""}`} onClick={(event) => event.stopPropagation()}>
-    <aside className="settings-nav"><div className="settings-nav-head"><button onClick={onClose}><IconChevron size={14} /> Back to Hyzr Chat</button><div><IconSearch size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" /></div></div><nav>{filteredNav.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.items.map((item) => <button key={item.id} className={page === item.id ? "on" : ""} onClick={() => selectPage(item.id)}>{item.icon}<span>{item.label}</span><IconChevron size={12} /></button>)}</section>)}</nav><div className="settings-local-plan"><span>L</span><div><strong>Local Developer</strong><small>Full access</small></div><IconCheck size={13} /></div></aside>
+    <aside className="settings-nav"><div className="settings-nav-head"><button onClick={onClose}><IconChevron size={14} /> Back to Hyzr Chat</button><div><IconSearch size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" /></div></div><nav>{filteredNav.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.items.map((item) => <button key={item.id} className={page === item.id ? "on" : ""} onClick={() => selectPage(item.id)}>{item.icon}<span>{item.label}</span><IconChevron size={12} /></button>)}</section>)}</nav><div className="settings-local-plan"><HyzrMark size={28} className="settings-plan-mark" /><div><strong>Hyzr Local</strong><small>Developer access</small></div><span className="settings-plan-status"><IconCheck size={12} /></span></div></aside>
     <main className="settings-content"><header><button className="settings-mobile-back" onClick={() => setMobileDetail(false)}><IconChevron size={14} /></button><div><span>Settings</span><h2>{title}</h2></div><button onClick={onClose} aria-label="Close settings"><IconX size={17} /></button></header><div className="settings-scroll">{routingLearning}{renderPage()}</div></main>
   </div></div>;
 }

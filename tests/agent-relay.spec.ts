@@ -65,5 +65,21 @@ test("paired relay preserves workspace identity and scopes results to the accoun
   const hidden = await stranger.get(`/api/agent/events?job=${encodeURIComponent(jobId)}&cursor=0`);
   expect(hidden.status()).toBe(404);
   await stranger.dispose();
+
+  const disconnected = await agent.post("/api/agent/disconnect", { data: { token } });
+  expect(disconnected.ok()).toBeTruthy();
+  const rejectedWhileOffline = await request.post("/api/agent/enqueue", {
+    data: {
+      job: {
+        id: `offline-${nonce}`,
+        conversationId,
+        workspaceId: conversationId,
+        prompt: "Continue",
+        history: [],
+      },
+    },
+  });
+  expect(rejectedWhileOffline.status()).toBe(410);
+  await expect(rejectedWhileOffline.json()).resolves.toMatchObject({ reason: "offline" });
   await agent.dispose();
 });
