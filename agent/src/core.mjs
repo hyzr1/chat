@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 3;
-const VERSION = "1.2.2";
+const VERSION = "1.2.3";
 const IS_WIN = process.platform === "win32";
 const DEFAULT_ROOT = path.join(os.homedir(), "Hyzr");
 const STATE_ROOT = path.join(os.homedir(), ".hyzr", "agent");
@@ -1223,11 +1223,6 @@ export async function runAgentCli() {
   console.log(`  ${muted("Access")}     ${permissionMode === "full-access" ? "Full local access" : "Project workspace only"}`);
   console.log("");
 
-  // Opening the paired web workspace is part of the launch experience. A
-  // computer without a token opens the one-time approval page in
-  // deviceAuthorize; an already-paired computer opens Hyzr directly.
-  if (saved.token && args.browser !== "false") openExternalUrl(cleanRelay(relay));
-
   if ("doctor" in args) {
     console.log(`  ${green("●")} Runtime is healthy`);
     console.log(`  ${muted("Relay")}      ${cleanRelay(relay)}`);
@@ -1235,6 +1230,16 @@ export async function runAgentCli() {
     console.log("");
     await releaseLock();
     return;
+  }
+
+  // A pairing token authorizes exactly one launcher session. Revoke any saved
+  // session before starting so every launch generates a new code and opens the
+  // browser approval page. Workspace and provider state remain untouched.
+  if (saved.token) {
+    try {
+      await post(cleanRelay(relay), "/api/agent/disconnect", { token: saved.token }, 1);
+    } catch {}
+    await writeAgentConfig({ relay: cleanRelay(relay), workspaceRoot, permissionMode });
   }
 
   let connectionState = "";

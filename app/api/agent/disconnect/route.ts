@@ -10,6 +10,6 @@ export async function POST(request: NextRequest) {
   const key = `agent:${token}`;
   const record = await kvGet<Record<string, unknown>>(key);
   if (!record) return NextResponse.json({ error: "Unknown agent token." }, { status: 401 });
-  await kvSet(key, { ...record, lastSeen: 0 }, 60 * 60 * 24 * 30);
+  await kvSet(key, { ...record, lastSeen: 0, revokedAt: Date.now() }, 60 * 60 * 24 * 30);
   return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
 }

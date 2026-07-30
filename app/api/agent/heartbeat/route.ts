@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
   if (!token) return NextResponse.json({ error: "Missing token." }, { status: 400 });
 
   const record = await getAgentRecord(token);
-  if (!record) return NextResponse.json({ error: "Unknown agent token." }, { status: 401 });
+  if (!record || record.revokedAt) return NextResponse.json({ error: "Expired agent session." }, { status: 401 });
   await touchAgent(token, record);
   return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -87,23 +87,11 @@ test("paired relay preserves workspace identity and scopes results to the accoun
   expect(rejectedWhileOffline.status()).toBe(410);
   await expect(rejectedWhileOffline.json()).resolves.toMatchObject({ reason: "offline" });
 
-  // A real launcher heartbeat immediately restores truthful presence after a
-  // transient disconnect marker.
+  // Disconnect revokes this launch session. It cannot silently reconnect with
+  // a stale token; the launcher must obtain a fresh one-time approval.
   expect((await agent.post("/api/agent/heartbeat", {
     headers: { Authorization: `Bearer ${token}` },
-  })).ok()).toBeTruthy();
-  const restored = await request.post("/api/agent/enqueue", {
-    data: {
-      job: {
-        id: `restored-${nonce}`,
-        conversationId,
-        workspaceId: conversationId,
-        prompt: "Continue",
-        history: [],
-      },
-    },
-  });
-  expect(restored.ok()).toBeTruthy();
+  })).status()).toBe(401);
   await agent.dispose();
 });
 
@@ -133,6 +121,13 @@ test("terminal-initiated device pairing is pending until browser approval", asyn
   expect(flow.userCode).toMatch(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
   expect(flow.deviceSecret.length).toBeGreaterThan(30);
   expect(flow.verificationUriComplete).toContain(encodeURIComponent(flow.userCode));
+  const secondStart = await agent.post("/api/agent/device/start", { data: { agent: {
+    protocol: 3, version: "1.2.3-test", host: "device-flow-test",
+    platform: "win32", node: process.version, claude: true, codex: true,
+    git: true, gh: true, engine: "claude+codex",
+  } } });
+  expect(secondStart.ok()).toBeTruthy();
+  expect((await secondStart.json()).userCode).not.toBe(flow.userCode);
 
   const pending = await agent.post("/api/agent/device/token", { data: { deviceSecret: flow.deviceSecret } });
   expect(pending.status()).toBe(202);
@@ -185,7 +180,7 @@ test("terminal-initiated device pairing is pending until browser approval", asyn
   const replacementExchange = await agent.post("/api/agent/device/token", { data: { deviceSecret: replacementFlow.deviceSecret } });
   const replacementToken = (await replacementExchange.json()).token;
   expect((await agent.post("/api/agent/heartbeat", { headers: { Authorization: `Bearer ${replacementToken}` } })).ok()).toBeTruthy();
-  expect((await agent.post("/api/agent/heartbeat", { headers: { Authorization: `Bearer ${token}` } })).ok()).toBeTruthy();
+  expect((await agent.post("/api/agent/heartbeat", { headers: { Authorization: `Bearer ${token}` } })).status()).toBe(401);
   const replacementJobId = `replacement-job-${nonce}`;
   expect((await request.post("/api/agent/enqueue", { data: { job: {
     id: replacementJobId, conversationId: replacementJobId, workspaceId: replacementJobId,

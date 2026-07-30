@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   if (!token) return NextResponse.json({ error: "Missing token." }, { status: 400 });
 
   const record = await getAgentRecord(token);
-  if (!record) return NextResponse.json({ error: "Unknown agent token." }, { status: 401 });
+  if (!record || record.revokedAt) return NextResponse.json({ error: "Expired agent session." }, { status: 401 });
   await touchAgent(token, record);
 
   const deadline = Date.now() + 8000;

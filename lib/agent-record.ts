@@ -9,6 +9,7 @@ export interface AgentRecord {
   agent: AgentCapabilities;
   pairedAt: number;
   lastSeen: number;
+  revokedAt?: number;
   linkCheckedAt?: number;
 }
 
@@ -59,7 +60,7 @@ export async function getAgentRecord(token: string) {
 // the next heartbeat without asking the user to pair again.
 export async function touchAgent(token: string, existing?: AgentRecord | null) {
   const record = existing ?? await getAgentRecord(token);
-  if (!record) return null;
+  if (!record || record.revokedAt) return null;
   const now = Date.now();
   const shouldCheckLink = Boolean(record.accountId) && now - Number(record.linkCheckedAt || 0) >= 30_000;
   const touched = { ...record, lastSeen: now, linkCheckedAt: shouldCheckLink ? now : record.linkCheckedAt };

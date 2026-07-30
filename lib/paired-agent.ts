@@ -22,12 +22,12 @@ export async function pairedAgent(request: NextRequest) {
   const codeToken = code ? await kvGet<string>(`token:${code}`) : null;
   const token = codeToken || (user ? await kvGet<string>(`account-agent:${user.id}`) : null);
   if (!token) return null;
-  const record = await kvGet<{ lastSeen: number; agent: AgentCapabilities }>(`agent:${token}`);
+  const record = await kvGet<{ lastSeen: number; revokedAt?: number; agent: AgentCapabilities }>(`agent:${token}`);
   if (!record) return null;
   return {
     code,
     token,
-    online: Date.now() - Number(record.lastSeen || 0) < AGENT_ONLINE_WINDOW_MS,
+    online: !record.revokedAt && Date.now() - Number(record.lastSeen || 0) < AGENT_ONLINE_WINDOW_MS,
     agent: record.agent,
     fingerprint: tokenFingerprint(token),
   };

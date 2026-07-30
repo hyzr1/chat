@@ -164,7 +164,7 @@ test("a known offline computer asks to reopen Hyzr instead of pairing again", as
   await page.locator("button.agent-presence").click();
   await expect(page.getByText("My PC is offline")).toBeVisible();
   await expect(page.getByText("Reopen Hyzr on your computer")).toBeVisible();
-  await expect(page.getByText(/there is no code to enter again/i)).toBeVisible();
+  await expect(page.getByText(/every launch creates a fresh one-time code/i)).toBeVisible();
   await expect(page.locator(".pair-code")).toHaveCount(0);
 });
 

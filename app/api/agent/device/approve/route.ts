@@ -51,6 +51,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, protocol: AGENT_PROTOCOL_VERSION });
   }
 
+  const previousToken = await kvGet<string>(`account-agent:${user.id}`);
+  if (previousToken) {
+    const previous = await kvGet<Record<string, unknown>>(`agent:${previousToken}`);
+    if (previous) {
+      await kvSet(`agent:${previousToken}`, {
+        ...previous,
+        lastSeen: 0,
+        revokedAt: Date.now(),
+      }, 60 * 60 * 24 * 30);
+    }
+  }
   const token = newToken();
   await registerAgent(token, user.id, state.agent);
   await kvSet(secretKey, {

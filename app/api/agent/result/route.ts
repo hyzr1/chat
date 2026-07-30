@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   const { token, jobId, type, text, data } = await request.json().catch(() => ({} as any));
   if (!token || !jobId || !type) return NextResponse.json({ error: "Missing fields." }, { status: 400 });
   const record = await getAgentRecord(token);
-  if (!record) return NextResponse.json({ error: "Unknown agent token." }, { status: 401 });
+  if (!record || record.revokedAt) return NextResponse.json({ error: "Expired agent session." }, { status: 401 });
   // Result delivery is also proof that the launcher is alive. This keeps
   // launchers from older releases online during long model/tool operations.
   await touchAgent(token, record);

@@ -2780,7 +2780,7 @@ export default function Home() {
                   <span><IconTerminal size={17} /></span>
                   <div>
                     <strong>Reopen Hyzr on your computer</strong>
-                    <p>Your pairing is saved. Open <code>{downloadPlatform === "windows" ? "hyzr.cmd" : "hyzr"}</code> and leave the terminal running—there is no code to enter again.</p>
+                    <p>Open <code>{downloadPlatform === "windows" ? "hyzr.cmd" : "hyzr"}</code>. Every launch creates a fresh one-time code and opens its secure approval page.</p>
                   </div>
                   <div className="pair-offline-actions">
                     <button onClick={openPair} disabled={pairLoading}>{pairLoading ? "Checking…" : "Check again"}</button>
