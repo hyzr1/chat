@@ -26,7 +26,30 @@ async function detect(command: string, versionArgs = ["--version"]) {
   return { available: true as const, version };
 }
 
+// True when the app is running on hosted/serverless infra (e.g. Vercel)
+// rather than on the user's own machine. In that case the server can't see
+// the user's local CLIs — they must run a local pairing agent instead.
+function isHosted() {
+  return (
+    process.env.VERCEL === "1" ||
+    process.env.HYZR_HOSTED === "1" ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME != null ||
+    process.env.NEXT_RUNTIME === "edge"
+  );
+}
+
 export async function GET() {
+  if (isHosted()) {
+    // Detection here would describe the serverless box, not the user. Report
+    // hosted mode so the client shows the "download the local agent" flow.
+    return NextResponse.json({
+      hosted: true,
+      platform: process.platform,
+      agentConnected: false,
+      ready: false,
+    }, { headers: { "Cache-Control": "no-store" } });
+  }
+
   const [git, claude, codex] = await Promise.all([
     detect("git"),
     detect("claude"),
@@ -41,6 +64,7 @@ export async function GET() {
   } catch {}
 
   return NextResponse.json({
+    hosted: false,
     platform: process.platform,
     host: os.hostname(),
     node: { available: true, version: process.version },
@@ -54,6 +78,7 @@ export async function GET() {
 
 // Create the isolated projects root if it does not exist yet.
 export async function POST() {
+  if (isHosted()) return NextResponse.json({ ok: false, error: "Not available on hosted Hyzr — pair a local agent." }, { status: 400 });
   try {
     await mkdir(WORKSPACE_DIRECTORY, { recursive: true });
     return NextResponse.json({ ok: true, path: WORKSPACE_DIRECTORY });

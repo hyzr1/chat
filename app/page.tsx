@@ -603,8 +603,10 @@ export default function Home() {
   const [incognito, setIncognito] = useState(false);
   const [showPair, setShowPair] = useState(false);
   const [pairLoading, setPairLoading] = useState(false);
+  const [agentPaired, setAgentPaired] = useState(false);
+  const [pairCode, setPairCode] = useState("");
   type Tool = { available: boolean; version: string | null };
-  const [pairInfo, setPairInfo] = useState<{ platform: string; host: string; node: Tool; git: Tool; claude: Tool; codex: Tool; workspace: { path: string; exists: boolean; projects: number }; ready: boolean } | null>(null);
+  const [pairInfo, setPairInfo] = useState<{ hosted?: boolean; platform: string; host?: string; node?: Tool; git?: Tool; claude?: Tool; codex?: Tool; workspace?: { path: string; exists: boolean; projects: number }; ready: boolean } | null>(null);
   const signedIn = account !== null;
   const [toast, setToast] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -1068,6 +1070,7 @@ export default function Home() {
   function openPair() {
     setShowPair(true);
     setPairLoading(true);
+    if (!pairCode) setPairCode(uid().replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase());
     fetch("/api/setup", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((info) => info && setPairInfo(info))
@@ -2341,7 +2344,7 @@ export default function Home() {
 
       {showPair && (() => {
         const p = pairInfo;
-        const connected = Boolean(p && (p.claude.available || p.codex.available));
+        const connected = Boolean(p && !p.hosted && (p.claude?.available || p.codex?.available));
         const row = (icon: React.ReactNode, label: string, tool: { available: boolean; version: string | null } | null, help: React.ReactNode) => (
           <div className={`pair-tool ${tool?.available ? "on" : "off"}`}>
             <span className="pt-icon">{icon}</span>
@@ -2362,10 +2365,40 @@ export default function Home() {
               <span className="pair-sheet-mark"><IconTerminal size={20} /></span>
               <div>
                 <h2>Pair your environment</h2>
-                <p>Connect this machine so Agent runs on your own Claude and Codex — no API key, no limits. Every project gets its own isolated workspace.</p>
+                <p>Run Agent on your own Claude and Codex — no API key, no limits. Every project gets its own isolated workspace on your machine.</p>
               </div>
             </div>
 
+            {p?.hosted ? (<>
+              <div className="pair-status pending">
+                <span className="ps-dot" />
+                {agentPaired ? "Your machine is paired — Agent runs locally." : "Download the Hyzr agent to connect this browser to your machine."}
+              </div>
+              <div className="pair-steps">
+                <div className="pair-step"><span className="pair-step-n">1</span><div>
+                  <b>Download the Hyzr agent</b>
+                  <span>A tiny app for your computer. It detects your Claude &amp; Codex and runs projects locally.</span>
+                  <a className="pw-create" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, textDecoration: "none" }} href="https://github.com/hyzr1/chat/releases" target="_blank" rel="noopener"><IconWindows size={13} /> Download for Windows</a>
+                </div></div>
+                <div className="pair-step"><span className="pair-step-n">2</span><div>
+                  <b>Enter your pairing code</b>
+                  <span>Open the agent and paste this code to link it to your account:</span>
+                  <div className="pair-code" style={{ marginTop: 8 }}>{(pairCode || "······").split("").map((c, i) => <b key={i}>{c}</b>)}</div>
+                </div></div>
+                <div className="pair-step"><span className="pair-step-n">3</span><div>
+                  <b>Build from anywhere</b>
+                  <span>This site sends Agent tasks to your machine; they run on your Claude/Codex and save to your isolated workspaces.</span>
+                </div></div>
+              </div>
+              <div className="pair-perms">
+                <IconShield size={14} />
+                <span>The agent runs on your computer. Hyzr never receives your files or keys — only the task and its result.</span>
+              </div>
+              <div className="pair-actions">
+                <button className="pair-primary" onClick={() => setShowPair(false)}>Done</button>
+                <span className="pair-secondary">No machine? Use the free chat or add API keys instead.</span>
+              </div>
+            </>) : (<>
             <div className={`pair-status ${connected ? "ready" : "pending"}`}>
               <span className="ps-dot" />
               {!p ? "Detecting your local environment…" : connected
@@ -2385,11 +2418,11 @@ export default function Home() {
 
             <div className="pair-workspace">
               <div className="pw-head"><IconFolder size={15} /> Projects folder</div>
-              <code>{p?.workspace.path || "…"}</code>
-              <span className="pw-note">{p?.workspace.exists
+              <code>{p?.workspace?.path || "…"}</code>
+              <span className="pw-note">{p?.workspace?.exists
                 ? "Each project you build gets its own isolated environment inside this folder."
                 : "Not created yet — it’s made automatically on your first project."}</span>
-              {p && !p.workspace.exists && <button className="pw-create" onClick={createWorkspaceRoot}>Create it now</button>}
+              {p && p.workspace && !p.workspace.exists && <button className="pw-create" onClick={createWorkspaceRoot}>Create it now</button>}
             </div>
 
             <div className="pair-perms">
@@ -2403,6 +2436,7 @@ export default function Home() {
                 : <button className="pair-primary" onClick={openPair} disabled={pairLoading}>{pairLoading ? "Checking…" : "Re-check"}</button>}
               <a className="pair-secondary" href="https://github.com/hyzr1/chat" target="_blank" rel="noopener">New here? Get Hyzr for Windows <IconExternal size={12} /></a>
             </div>
+            </>)}
           </div>
         </div>
         );
