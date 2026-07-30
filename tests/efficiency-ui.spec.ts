@@ -110,7 +110,8 @@ test("hosted computer setup is a compact terminal download and code", async ({ p
     body: JSON.stringify({ status: "waiting" }),
   }));
   await page.goto("/");
-  await page.locator("button.top-download").click();
+  await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
+  await page.locator("button.agent-presence").click();
   await expect(page.getByRole("heading", { name: "Connect your computer" })).toBeVisible();
   const download = page.locator(".pair-download");
   await expect(download).toContainText(/Download hyzr/);
@@ -147,7 +148,8 @@ test("a known offline computer asks to reopen Hyzr instead of pairing again", as
     }),
   }));
   await page.goto("/");
-  await page.locator("button.top-download").click();
+  await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
+  await page.locator("button.agent-presence").click();
   await expect(page.getByText("My PC is offline")).toBeVisible();
   await expect(page.getByText("Reopen Hyzr on your computer")).toBeVisible();
   await expect(page.getByText(/there is no code to enter again/i)).toBeVisible();
@@ -242,7 +244,7 @@ test("Preview starts a project dev server even before an HTML build exists", asy
   await expect(page.getByRole("button", { name: "Collapse all" })).toHaveCount(0);
   await page.locator(".file-window-actions").getByRole("button", { name: "Close" }).click();
   await page.locator(".preview-actions").getByRole("button", { name: "Close" }).click();
-  await page.getByRole("button", { name: "Preview" }).click();
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
   await expect(page.locator(".preview-path")).toHaveText("http://localhost:5173");
   const pageCount = page.context().pages().length;
   await page.locator(".preview-actions").getByRole("button", { name: "Close" }).click();
@@ -285,6 +287,58 @@ test("Agent send waits for presence and never leaves an offline request analyzin
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText(/Hyzr is offline\. Reopen/i)).toBeVisible({ timeout: 5_000 });
   await expect(page.getByText(/Analyzing your request/i)).toHaveCount(0);
+});
+
+test("Agent conversations stay in Agent history and restore their workspace surface", async ({ page }) => {
+  await createTestAccount(page);
+  const title = `Inspect repository code ${Date.now()}`;
+  const agent = {
+    host: "History PC",
+    platform: "win32",
+    version: "1.1.3",
+    node: "v24",
+    claude: true,
+    codex: true,
+    git: true,
+    gh: true,
+    engine: "claude+codex",
+    workspaceRoot: "C:\\Users\\developer\\Hyzr",
+  };
+  await page.route("**/api/setup", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ hosted: true, agentConnected: true, ready: true, agent }),
+  }));
+  await page.route("**/api/agent/enqueue", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ ok: true, jobId: "history-run" }),
+  }));
+  await page.route("**/api/agent/events**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ events: [{ type: "text", text: "Repository inspected." }, { type: "done" }], cursor: 2 }),
+  }));
+  await page.route("**/api/workspace**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ files: [], entry: null, count: 0 }),
+  }));
+  await page.goto("/");
+  await page.locator(".workmode-toggle").getByRole("tab", { name: "Agent" }).click();
+  await page.locator("textarea").fill(title);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Repository inspected.")).toBeVisible();
+  const agentUrl = page.url();
+  await expect(page.getByRole("button", { name: title })).toBeVisible();
+  await page.waitForTimeout(800);
+
+  await page.locator(".workmode-toggle").getByRole("tab", { name: "Home" }).click();
+  await expect(page.getByRole("button", { name: title })).toHaveCount(0);
+  await page.goto(agentUrl);
+  await expect(page.locator(".workmode-toggle").getByRole("tab", { name: "Agent" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".top-context")).toContainText("Project workspace");
+  await expect(page.locator(".top-context")).not.toContainText("Free model");
 });
 
 test("mobile preview renders beside chat and targets the computer's Wi-Fi server", async ({ page }) => {

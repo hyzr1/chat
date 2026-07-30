@@ -247,6 +247,7 @@ interface Session {
   messages: Msg[];
   createdAt: number;
   updatedAt: number;
+  surface?: WorkMode;
   project?: { name: string; repo?: string; instructions?: string };
 }
 
@@ -357,8 +358,22 @@ function removeReplayedTurns(messages: Msg[]): Msg[] {
   return cleaned;
 }
 
+function inferredSessionSurface(session: Session): WorkMode {
+  if (session.surface === "code" || session.surface === "chat") return session.surface;
+  if (session.project?.name) return "code";
+  const firstPrompt = session.messages?.find((message) => message.role === "user")?.content || session.title || "";
+  return /\b(?:code|project|repo|website|web\s*app|html|css|javascript|typescript|next\.?js|react|vue|svelte|debug|refactor|implement|dev\s*server|git|github)\b/i.test(firstPrompt)
+    ? "code"
+    : "chat";
+}
+
 function normalizeSession(session: Session): Session {
-  return { ...session, updatedAt: sessionTimestamp(session), messages: Array.isArray(session.messages) ? removeReplayedTurns(session.messages) : [] };
+  return {
+    ...session,
+    surface: inferredSessionSurface(session),
+    updatedAt: sessionTimestamp(session),
+    messages: Array.isArray(session.messages) ? removeReplayedTurns(session.messages) : [],
+  };
 }
 
 function mergeSessions(local: Session[], remote: Session[], tombstones: Record<string, number>) {
@@ -808,6 +823,7 @@ export default function Home() {
           setCurrentId(active.id);
           applyingRemoteMessagesRef.current = true;
           setMessages(active.messages);
+          setWorkMode(inferredSessionSurface(active));
         } else if (urlId) {
           window.history.replaceState({}, "", "/");
         }
@@ -815,7 +831,7 @@ export default function Home() {
         if (p) {
           const prefs = JSON.parse(p);
           if (prefs.mode) setMode(prefs.mode);
-          if (prefs.workMode === "chat" || prefs.workMode === "code") setWorkMode(prefs.workMode);
+          if (!active && (prefs.workMode === "chat" || prefs.workMode === "code")) setWorkMode(prefs.workMode);
           if (["dark", "light", "system"].includes(prefs.theme)) setTheme(prefs.theme);
           if (prefs.productPrefs) setProductPrefs({ ...DEFAULT_PRODUCT_PREFS, ...prefs.productPrefs });
           if (prefs.routingRules && prefs.routingPolicyVersion === 3) setRoutingRules({ ...DEFAULT_ROUTING_RULES, ...prefs.routingRules });
@@ -1116,7 +1132,9 @@ export default function Home() {
     name,
     sessions: sessions.filter((session) => session.project?.name === name),
   }));
-  const looseSessions = sessions.filter((session) => !session.project?.name);
+  const looseSessions = sessions.filter((session) =>
+    !session.project?.name && inferredSessionSurface(session) === workMode,
+  );
 
   function saveKeys(k: Keys) {
     setKeys(k);
@@ -1255,6 +1273,9 @@ export default function Home() {
     if (isMobileViewport()) setCollapsed(true);
   }
   function openSession(s: Session) {
+    const surface = inferredSessionSurface(s);
+    setWorkMode(surface);
+    setPlanOn(surface === "code");
     setCurrentId(s.id);
     applyingRemoteMessagesRef.current = true;
     setMessages(s.messages);
@@ -1406,6 +1427,7 @@ export default function Home() {
         messages: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        surface: workMode,
         project: space ? { name: space.name, repo: space.repo, instructions: space.instructions } : undefined,
       };
       setSessions((prev) => {
@@ -2124,7 +2146,13 @@ export default function Home() {
             }
           }
         }}
-        placeholder={remoteRunActive ? "Running on another device — updates appear here live" : busy ? "Add guidance while agents work — Enter queues it" : "Ask anything — Hyzr Chat routes it to the right model"}
+        placeholder={remoteRunActive
+          ? "Running on another device — updates appear here live"
+          : busy
+            ? "Add guidance while agents work — Enter queues it"
+            : workMode === "code"
+              ? "Ask Hyzr to build, edit, debug, or run anything"
+              : "Ask anything"}
         rows={1}
       />
       <input
@@ -2274,6 +2302,11 @@ export default function Home() {
   const visibleMessages = hiddenMessageCount ? messages.slice(hiddenMessageCount) : messages;
   const activeTaskRuns = taskRuns.filter((run) => run.status === "running");
   const showBackgroundRun = activeTaskRuns.length > 0 && view !== "tasks";
+  const pairedToolLabel = [
+    agentInfo?.claude && "Claude",
+    agentInfo?.codex && "Codex",
+    agentInfo?.git && "Git",
+  ].filter(Boolean).join(" · ");
 
   return (
     <div className="app">
@@ -2450,18 +2483,26 @@ export default function Home() {
               {previewStarting ? <span className="spinner" /> : <IconEye size={15} />} {previewStarting ? "Starting…" : "Preview"}
             </button>
           )}
-          {workMode === "code" && <div className="mode-toggle compact" aria-label="Execution source">
+          {workMode === "code" && hasKeys && <div className="mode-toggle compact" aria-label="Execution source">
             <button className={mode === "local" ? "on" : ""} onClick={() => switchMode("local")} title="Use local subscriptions">Local</button>
             <button className={mode === "byok" ? "on" : ""} onClick={() => switchMode("byok")} title="Use API keys">API</button>
           </div>}
-          <div className="top-links">
+          {workMode === "chat" && <div className="top-links">
             <a className="top-link" href="https://code.hyzr.ai" target="_blank" rel="noopener" title="Learn to code — Hyzr Code">
               Code <IconExternal size={12} />
             </a>
-            <button className="top-download" onClick={() => requireAuth(() => openPair())} title="Download the pairer for Windows">
-              <IconWindows size={14} /> Download
+          </div>}
+          {workMode === "code" && (
+            <button
+              className={`agent-presence ${agentPaired ? "online" : "offline"}`}
+              onClick={() => requireAuth(() => openPair())}
+              title={agentPaired ? `Connected to ${agentInfo?.host || "your computer"}` : agentInfo ? "Reopen Hyzr on your computer" : "Connect your computer"}
+            >
+              <i />
+              <span>{agentPaired ? agentInfo?.host || "Computer connected" : agentInfo ? "Computer offline" : "Connect computer"}</span>
+              <IconChevron size={11} />
             </button>
-          </div>
+          )}
           <button
             className={`top-icon ${incognito ? "on" : ""}`}
             onClick={() => setIncognito((v) => !v)}
@@ -2512,7 +2553,19 @@ export default function Home() {
         ) : messages.length === 0 ? (
           <div className="center">
             <div className="home-intro">
+              {workMode === "code" && (
+                <span className={`agent-kicker ${agentPaired ? "online" : ""}`}>
+                  <i /> {agentPaired ? `${agentInfo?.host || "Your computer"} is ready` : agentInfo ? "Your computer is offline" : "Local workspace"}
+                </span>
+              )}
               <h1>{incognito ? "You’re incognito" : workMode === "chat" ? "What do you want to know?" : "What should we build?"}</h1>
+              {workMode === "code" && (
+                <p className="agent-intro-copy">
+                  {agentPaired
+                    ? `Claude and Codex can work directly in ${agentInfo?.workspaceRoot || "your local project folder"}.`
+                    : "Pair once, then build from this browser or your phone while every file stays on your computer."}
+                </p>
+              )}
             </div>
             {composer}
             {incognito && <p className="incognito-note">Sessions you create won’t be saved to your history.</p>}
@@ -2534,16 +2587,25 @@ export default function Home() {
                 </button>
               ))}
             </div>}
-            {workMode === "code" && (
-              <div className="pair-cta">
+            {workMode === "code" && (agentPaired ? (
+              <button className="agent-ready-card" onClick={openPair}>
+                <span className="agent-ready-icon"><IconTerminal size={15} /></span>
+                <span className="agent-ready-copy">
+                  <b>Connected to {agentInfo?.host || "your computer"}</b>
+                  <span>{pairedToolLabel || "Local tools ready"} · Projects stay in {agentInfo?.workspaceRoot || "~/Hyzr"}</span>
+                </span>
+                <span className="agent-ready-manage">Manage <IconChevron size={11} /></span>
+              </button>
+            ) : (
+              <div className={`pair-cta ${agentInfo ? "known-offline" : ""}`}>
                 <IconTerminal size={20} />
                 <span className="pair-cta-text">
-                  <b>Connect your computer</b>
-                  <span>One tiny terminal file. Your projects stay on your computer.</span>
+                  <b>{agentInfo ? "Your computer is offline" : "Connect your computer"}</b>
+                  <span>{agentInfo ? "Reopen Hyzr to continue in the same projects." : "One tiny terminal file. Your projects stay on your computer."}</span>
                 </span>
-                <button className="pair-cta-btn" onClick={openPair}><IconTerminal size={13} /> Connect</button>
+                <button className="pair-cta-btn" onClick={openPair}>{agentInfo ? "How to reconnect" : "Connect"}</button>
               </div>
-            )}
+            ))}
           </div>
         ) : (
           <>
@@ -3113,7 +3175,7 @@ function ThreadMinimap({ messages, containerRef }: { messages: Msg[]; containerR
     container.addEventListener("scroll", sync, { passive: true });
     return () => container.removeEventListener("scroll", sync);
   }, [containerRef, messages.length]);
-  if (!turns.length) return null;
+  if (turns.length < 3) return null;
   const jump = (turnIndex: number) => {
     const container = containerRef.current;
     const nodes = container?.querySelectorAll<HTMLElement>(".thread-inner > .msg");
