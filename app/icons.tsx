@@ -299,6 +299,23 @@ export const IconHome = (p: P) => (
   </Svg>
 );
 
+export const IconLock = (p: P) => (
+  <Svg {...p}>
+    <rect x="5" y="10.5" width="14" height="9.5" rx="2" />
+    <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" />
+  </Svg>
+);
+
+export const IconIncognito = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 12h16" />
+    <path d="M6.5 12l1.3-4.4a2 2 0 0 1 1.9-1.4h4.6a2 2 0 0 1 1.9 1.4L17.5 12" />
+    <circle cx="7.5" cy="15.5" r="2.4" />
+    <circle cx="16.5" cy="15.5" r="2.4" />
+    <path d="M9.9 15.2a2.4 2.4 0 0 1 4.2 0" />
+  </Svg>
+);
+
 // Windows flag — filled quadrants, so it renders with fill not stroke.
 export const IconWindows = ({ size = 18, className }: P) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">

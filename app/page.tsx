@@ -51,6 +51,8 @@ import {
   IconTerminal,
   IconHome,
   IconWindows,
+  IconLock,
+  IconIncognito,
   IconPackage,
   IconEye,
   IconExternal,
@@ -416,6 +418,14 @@ function tierModel(tier: string) {
   return LOCAL_MODELS[id];
 }
 
+const GUEST_FEATURES: { key: string; title: string; blurb: string; icon: React.ReactNode }[] = [
+  { key: "agent", title: "Agent", blurb: "Build full projects in an isolated, paired workspace — from your phone or browser.", icon: <IconTerminal size={16} /> },
+  { key: "routing", title: "Model routing", blurb: "Every task is auto-routed to the model that fits it best — or pick your own.", icon: <IconRoute size={16} /> },
+  { key: "research", title: "Deep research", blurb: "Multi-step research across sources, returned as a cited, saveable report.", icon: <IconSearch size={16} /> },
+  { key: "artifacts", title: "Artifacts", blurb: "Generate and iterate on live documents, apps, and previews.", icon: <IconLayers size={16} /> },
+  { key: "memory", title: "Memory", blurb: "Hyzr remembers your context and preferences across every chat.", icon: <IconSparkles size={16} /> },
+];
+
 const SUGGESTIONS = [
   {
     label: "Build an interface",
@@ -590,6 +600,7 @@ export default function Home() {
   // into signIn()/signOut() without touching the gating.
   const [account, setAccount] = useState<{ name: string; email: string } | null>(null);
   const [showLogin, setShowLogin] = useState(false);
+  const [incognito, setIncognito] = useState(false);
   const signedIn = account !== null;
   const [toast, setToast] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -827,9 +838,11 @@ export default function Home() {
 
   useEffect(() => {
     if (!sessionsLoadedRef.current) return;
+    // Incognito never touches durable storage: sessions stay in memory only.
+    const persist = productPrefs.saveHistory && !incognito;
     const timer = window.setTimeout(() => {
-      storeSet(SESSIONS_KEY, productPrefs.saveHistory ? sessions : []).catch(() => {});
-      if (productPrefs.saveHistory) {
+      storeSet(SESSIONS_KEY, persist ? sessions : []).catch(() => {});
+      if (persist) {
         const changedSessions = sessions.filter((session) => session.updatedAt > (pushedVersionsRef.current[session.id] ?? 0));
         const tombstoneVersion = JSON.stringify(tombstonesRef.current);
         if (changedSessions.length || tombstoneVersion !== pushedTombstonesRef.current) fetch("/api/sessions", {
@@ -844,13 +857,13 @@ export default function Home() {
         }).catch(() => {});
       }
       try {
-        if (productPrefs.saveHistory) localStorage.setItem("hyzr.chat.sessionIndex", JSON.stringify(sessions.map(({ id, title, createdAt }) => ({ id, title, createdAt }))));
+        if (persist) localStorage.setItem("hyzr.chat.sessionIndex", JSON.stringify(sessions.map(({ id, title, createdAt }) => ({ id, title, createdAt }))));
         else localStorage.removeItem("hyzr.chat.sessionIndex");
         localStorage.removeItem(SESSIONS_KEY);
       } catch {}
     }, busy ? 500 : 120);
     return () => window.clearTimeout(timer);
-  }, [sessions, busy, productPrefs.saveHistory]);
+  }, [sessions, busy, productPrefs.saveHistory, incognito]);
 
   useEffect(() => {
     let live = true;
@@ -2038,7 +2051,24 @@ export default function Home() {
           )}
         </div>
         </>)}
-        {!signedIn && <div className="guest-fill" />}
+        {!signedIn && (<>
+          <div className="side-section guest-section-head"><span>Unlock with an account</span></div>
+          <div className="guest-features">
+            {GUEST_FEATURES.map((f) => (
+              <div className="feature-lock" key={f.key}>
+                <button className="nav-btn locked" onClick={() => setShowLogin(true)}>
+                  {f.icon}<span className="fl-title">{f.title}</span><IconLock size={13} className="fl-lock" />
+                </button>
+                <div className="feature-preview" role="tooltip">
+                  <div className="fp-head">{f.icon}<strong>{f.title}</strong></div>
+                  <p>{f.blurb}</p>
+                  <button className="fp-signin" onClick={() => setShowLogin(true)}>Sign in to use <IconArrowRight size={13} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="guest-fill" />
+        </>)}
 
         <div className="side-bottom">
           {signedIn ? (
@@ -2048,9 +2078,10 @@ export default function Home() {
               <IconSliders size={15} />
             </button>
           ) : (
-            <button className="side-signin" onClick={() => setShowLogin(true)}>
-              Log in or sign up
-            </button>
+            <div className="guest-signin">
+              <p className="gs-copy"><b>Save your work</b>Sign in to keep history, use API keys, and pair your machine.</p>
+              <button className="gs-btn" onClick={() => setShowLogin(true)}>Log in</button>
+            </div>
           )}
         </div>
       </aside>
@@ -2105,6 +2136,14 @@ export default function Home() {
               <IconWindows size={14} /> Download
             </button>
           </div>
+          <button
+            className={`top-icon ${incognito ? "on" : ""}`}
+            onClick={() => setIncognito((v) => !v)}
+            title={incognito ? "Incognito is on — sessions won't be saved" : "Go incognito"}
+            aria-pressed={incognito}
+          >
+            <IconIncognito size={16} />
+          </button>
           {signedIn
             ? <button className="top-icon" onClick={() => setShowSettings(true)} title="Settings"><IconSliders size={15} /></button>
             : <button className="top-signin" onClick={() => setShowLogin(true)}>Sign in</button>}
@@ -2147,9 +2186,10 @@ export default function Home() {
         ) : messages.length === 0 ? (
           <div className="center">
             <div className="home-intro">
-              <h1>{workMode === "chat" ? "What do you want to know?" : "What should we build?"}</h1>
+              <h1>{incognito ? "You’re incognito" : workMode === "chat" ? "What do you want to know?" : "What should we build?"}</h1>
             </div>
             {composer}
+            {incognito && <p className="incognito-note">Sessions you create won’t be saved to your history.</p>}
             {workMode === "code" && <div className="suggestions">
               {SUGGESTIONS.map((s) => (
                 <button

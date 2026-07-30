@@ -4587,3 +4587,94 @@ select {
   transition: opacity 0.13s;
 }
 .pair-cta-btn:hover { opacity: 0.9; }
+
+/* ---------------- Incognito + guest feature teasers ---------------- */
+.top-icon.on {
+  background: var(--text);
+  color: var(--bg);
+}
+.top-icon.on:hover { opacity: 0.9; background: var(--text); }
+.incognito-note {
+  width: 100%;
+  max-width: 760px;
+  margin: 14px 0 0;
+  color: var(--text-faint);
+  font-size: 13px;
+  text-align: center;
+}
+/* Guest sidebar: section head + locked feature rows with hover previews */
+.guest-section-head { margin-top: 4px; }
+.guest-features { display: grid; gap: 1px; }
+.feature-lock { position: relative; }
+.nav-btn.locked {
+  width: 100%;
+  color: var(--text-soft);
+}
+.nav-btn.locked .fl-title { flex: 1; text-align: left; }
+.nav-btn.locked .fl-lock { color: var(--text-faint); opacity: 0.7; }
+.nav-btn.locked:hover { background: var(--panel-2); color: var(--text); }
+.feature-preview {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: -6px;
+  z-index: 60;
+  width: 240px;
+  padding: 14px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: 13px;
+  background: var(--panel);
+  box-shadow: 0 20px 50px -18px rgba(0, 0, 0, 0.32);
+  opacity: 0;
+  transform: translateX(-6px);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.feature-lock:hover .feature-preview {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+.fp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.fp-head svg { color: var(--text); }
+.fp-head strong { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
+.feature-preview p { margin: 0 0 12px; color: var(--text-faint); font-size: 12px; line-height: 1.5; }
+.fp-signin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--bg);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: opacity 0.13s;
+}
+.fp-signin:hover { opacity: 0.9; }
+
+/* Bottom-left sign-in, ChatGPT style: a quiet promo + a minimal outlined button */
+.guest-signin { display: grid; gap: 10px; padding: 4px 2px 2px; }
+.gs-copy {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.gs-copy b { display: block; margin-bottom: 2px; color: var(--text); font-size: 12.5px; font-weight: 600; }
+.gs-btn {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.13s, border-color 0.13s;
+}
+.gs-btn:hover { background: var(--panel-2); }
