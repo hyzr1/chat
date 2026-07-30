@@ -1,19 +1,20 @@
 #!/usr/bin/env node
-// Hyzr local agent.
+// Hyzr local agent (relay bridge).
 //
-// Runs on the user's own computer. It detects the local Claude and Codex
-// CLIs, claims a pairing code from the hosted Hyzr app, then long-polls for
-// tasks, runs each one on the local CLI, and streams the output back. This is
-// what lets a hosted (Vercel) deployment execute on a user's own machine.
+// Runs on the user's own computer. It bridges a hosted Hyzr deployment to the
+// FULL Hyzr pipeline running locally: it pulls tasks from the hosted relay and
+// runs each one through the local app's /api/chat, which does real capability
+// routing across BOTH the user's Claude and Codex (that's the whole point of
+// Hyzr — no single-model preference), then streams the output back.
 //
-//   node index.mjs --code=ABC123 --url=https://chat.hyzr.ai
+//   node index.mjs --url=https://chat.hyzr.ai --code=ABC123 --app=http://localhost:3000
 //
-// Env alternatives: HYZR_URL, HYZR_CODE.
+// --url  : the hosted Hyzr app the code came from (the relay)
+// --app  : the local Hyzr app running the pipeline (default http://localhost:3000)
+// Env alternatives: HYZR_URL, HYZR_CODE, HYZR_APP.
 
-import { spawn, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir } from "node:fs/promises";
-import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
 
@@ -21,14 +22,15 @@ const execFileAsync = promisify(execFile);
 const IS_WIN = process.platform === "win32";
 
 const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
-const BASE = (arg("url") || process.env.HYZR_URL || "http://localhost:3000").replace(/\/$/, "");
-const WORKSPACES = path.join(os.homedir(), "hyzr-agent-workspaces");
+const RELAY = (arg("url") || process.env.HYZR_URL || "http://localhost:3000").replace(/\/$/, "");
+const APP = (arg("app") || process.env.HYZR_APP || RELAY).replace(/\/$/, "");
+const PLAN = (arg("plan") || process.env.HYZR_PLAN || "true").toLowerCase() !== "false";
 
 function log(...a) { console.log("[hyzr-agent]", ...a); }
 
-async function ask(question) {
+async function ask(q) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => rl.question(question, (a) => { rl.close(); resolve(a.trim()); }));
+  return new Promise((r) => rl.question(q, (a) => { rl.close(); r(a.trim()); }));
 }
 
 async function detect(cmd) {
@@ -37,38 +39,62 @@ async function detect(cmd) {
 }
 
 async function post(url, body) {
-  const res = await fetch(`${BASE}${url}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  return res.json().catch(() => ({}));
+  try { return await (await fetch(`${RELAY}${url}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json(); }
+  catch { return {}; }
 }
 
-// Run one task on the local CLI, streaming stdout back as it arrives.
-function runJob(job, token, engine) {
-  return new Promise(async (resolve) => {
-    const cwd = path.join(WORKSPACES, String(job.id).replace(/[^a-z0-9]/gi, "").slice(0, 24) || "task");
-    await mkdir(cwd, { recursive: true }).catch(() => {});
-    // Both CLIs read the prompt from stdin — no shell-escaping headaches.
-    const args = engine === "claude" ? ["-p"] : ["exec", "-"];
-    const child = spawn(engine, args, { cwd, shell: IS_WIN, windowsHide: true });
-    child.stdin.write(job.prompt);
-    child.stdin.end();
-    let buffered = "";
-    let timer = null;
-    const flush = () => { if (buffered) { post("/api/agent/result", { token, jobId: job.id, type: "text", text: buffered }); buffered = ""; } };
-    child.stdout.on("data", (d) => { buffered += d.toString(); if (!timer) timer = setTimeout(() => { timer = null; flush(); }, 250); });
-    child.stderr.on("data", (d) => log(`${engine} stderr:`, d.toString().slice(0, 200)));
-    child.on("close", (code) => {
-      if (timer) clearTimeout(timer);
-      flush();
-      post("/api/agent/result", { token, jobId: job.id, type: code === 0 ? "done" : "error", text: code === 0 ? "" : `${engine} exited with code ${code}` });
-      log(`job ${job.id} finished (exit ${code})`);
-      resolve();
-    });
-    child.on("error", (err) => { post("/api/agent/result", { token, jobId: job.id, type: "error", text: String(err.message) }); resolve(); });
-  });
+// Run one task through the LOCAL app's full pipeline and stream results back.
+async function runJob(job, token) {
+  const runId = `agent-${String(job.id).replace(/[^a-z0-9-]/gi, "")}`;
+  const payload = {
+    messages: [{ role: "user", content: job.prompt }],
+    keys: { anthropic: "", openai: "", linear: "" },
+    override: job.model || "auto",
+    mode: "local",
+    plan: PLAN,                       // capability routing across both CLIs
+    sessionId: runId,
+    runId,
+    effort: "high",
+    preferences: { adaptiveRouting: true },
+  };
+  let res;
+  try {
+    res = await fetch(`${APP}/api/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+  } catch (err) {
+    await post("/api/agent/result", { token, jobId: job.id, type: "error", text: `Couldn't reach your local Hyzr app at ${APP}. Is it running? (${err.message})` });
+    return;
+  }
+  if (!res.ok || !res.body) {
+    await post("/api/agent/result", { token, jobId: job.id, type: "error", text: `Local Hyzr returned ${res.status}.` });
+    return;
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  let got = false;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data:")) continue;
+      let evt;
+      try { evt = JSON.parse(line.slice(5).trim()); } catch { continue; }
+      if (evt.type === "text" && evt.text) { got = true; await post("/api/agent/result", { token, jobId: job.id, type: "text", text: evt.text }); }
+      else if (evt.type === "status" && evt.status) { await post("/api/agent/result", { token, jobId: job.id, type: "status", text: evt.status }); }
+      else if (evt.type === "error" && evt.message) { await post("/api/agent/result", { token, jobId: job.id, type: "error", text: evt.message }); }
+    }
+  }
+  await post("/api/agent/result", { token, jobId: job.id, type: "done", text: got ? "" : "No output produced." });
+  log(`job ${job.id} finished`);
 }
 
 async function main() {
-  log(`connecting to ${BASE}`);
+  log(`relay: ${RELAY}`);
+  log(`local pipeline: ${APP}`);
   const agent = {
     host: os.hostname(),
     platform: process.platform,
@@ -77,28 +103,22 @@ async function main() {
     git: await detect("git"),
     node: process.version,
   };
-  // Adapt to whatever the machine has: prefer an explicit --engine, else
-  // Claude, else Codex. Works fine if only one is installed.
-  const wanted = (arg("engine") || process.env.HYZR_ENGINE || "").toLowerCase();
-  const engine = (wanted === "claude" && agent.claude) ? "claude"
-    : (wanted === "codex" && agent.codex) ? "codex"
-    : agent.claude ? "claude" : agent.codex ? "codex" : null;
-  if (!engine) { log("No Claude or Codex CLI found on PATH. Install one, sign in, and re-run."); process.exit(1); }
-  agent.engine = engine;
-  log(`detected: claude=${agent.claude} codex=${agent.codex} git=${agent.git} node=${agent.node} → using ${engine}`);
+  // Report both — the pipeline routes each task to whichever fits best.
+  agent.engine = agent.claude && agent.codex ? "claude+codex" : agent.claude ? "claude" : agent.codex ? "codex" : "";
+  if (!agent.claude && !agent.codex) { log("No Claude or Codex CLI found. Install at least one, sign in, and re-run."); process.exit(1); }
+  log(`detected: claude=${agent.claude} codex=${agent.codex} git=${agent.git} node=${agent.node} → routing across ${agent.engine}`);
 
   const code = (arg("code") || process.env.HYZR_CODE || await ask("Enter the pairing code from the Hyzr app: ")).toUpperCase();
   const paired = await post("/api/agent/pair", { code, agent });
   if (!paired.token) { log("Pairing failed:", paired.error || "unknown error"); process.exit(1); }
   const token = paired.token;
-  log(`paired. running tasks on your ${engine} — leave this window open.`);
+  log("paired. leave this window open — Agent tasks will run here on your machine.");
 
-  // Long-poll forever; the endpoint returns quickly when idle so this stays cheap.
   while (true) {
     try {
-      const res = await fetch(`${BASE}/api/agent/poll?token=${token}`);
+      const res = await fetch(`${RELAY}/api/agent/poll?token=${token}`);
       const { job } = await res.json();
-      if (job) { log(`task received: ${String(job.prompt).slice(0, 60)}…`); await runJob(job, token, engine); }
+      if (job) { log(`task: ${String(job.prompt).slice(0, 70)}…`); await runJob(job, token); }
     } catch (err) {
       log("poll error, retrying in 3s:", String(err.message || err));
       await new Promise((r) => setTimeout(r, 3000));

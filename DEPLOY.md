@@ -32,16 +32,25 @@ Optional: set `HYZR_CHAT_ACCESS_TOKEN` only for a private/self-hosted instance.
 ## 2. How a user connects their environment
 
 On the hosted site, a signed-in user opens **Download → Pair your environment**
-and gets a 6-character code. On their PC they run:
+and gets a 6-character code. On their PC they:
 
-```bash
-npx @hyzr/agent --url=https://chat.hyzr.ai --code=ABC123
-# or, from a checkout:
-node agent/index.mjs --url=https://chat.hyzr.ai --code=ABC123
-```
+1. Run the Hyzr app locally (this is the full pipeline — planning + capability
+   routing across **both** Claude and Codex + isolated workspaces):
+   ```bash
+   npm install && npm run dev      # serves http://localhost:3000
+   ```
+2. Run the agent bridge, which connects that local pipeline to the hosted site:
+   ```bash
+   node agent/index.mjs --url=https://chat.hyzr.ai --code=ABC123 --app=http://localhost:3000
+   ```
 
-The agent detects their Claude/Codex, pairs, and long-polls for tasks. Agent
-tasks from the hosted site then run on **their** machine and stream back.
+The bridge pairs, then for each task the hosted site sends, it runs it through
+the **local** `/api/chat` — so every task is decomposed and routed across the
+user's own Claude and Codex (no single-model preference), executing in isolated
+workspaces on their machine, streaming results back.
+
+> Roadmap: fold the bridge into the app so it's a single download that
+> auto-connects when paired (one process instead of two).
 
 ## 3. What still uses which path
 

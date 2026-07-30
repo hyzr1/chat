@@ -2483,7 +2483,7 @@ export default function Home() {
               <div className={`pair-status ${agentPaired ? "ready" : "pending"}`}>
                 <span className="ps-dot" />
                 {agentPaired
-                  ? `Connected — Agent runs on your ${agentInfo?.engine === "codex" ? "Codex" : agentInfo?.engine === "claude" ? "Claude" : "machine"}${agentInfo?.host ? ` (${agentInfo.host})` : ""}.`
+                  ? `Connected — Agent routes across your ${agentInfo?.engine === "claude+codex" ? "Claude + Codex" : agentInfo?.engine === "codex" ? "Codex" : agentInfo?.engine === "claude" ? "Claude" : "machine"}${agentInfo?.host ? ` (${agentInfo.host})` : ""}.`
                   : "Waiting for your machine — run the agent with the code below."}
               </div>
               {agentPaired ? (
