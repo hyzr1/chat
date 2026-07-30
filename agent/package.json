@@ -1,0 +1,10 @@
+{
+  "name": "@hyzr/agent",
+  "version": "0.1.0",
+  "description": "Hyzr local agent — runs Agent tasks on your own machine's Claude and Codex.",
+  "type": "module",
+  "bin": { "hyzr-agent": "index.mjs" },
+  "engines": { "node": ">=18" },
+  "files": ["index.mjs"],
+  "license": "MIT"
+}
