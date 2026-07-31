@@ -32,7 +32,6 @@ import {
   IconArrowUp,
   IconChevron,
   IconSparkles,
-  IconChat,
   IconCpu,
   IconImage,
   IconCode,
@@ -1388,6 +1387,28 @@ export default function Home() {
       setShowSettings(true);
       return;
     }
+    // Agent mode with no connected computer: don't start a chat turn or reply
+    // "you're not paired" — just open the Connect-your-computer popup. A fresh
+    // presence check avoids acting on a stale offline state.
+    if (workMode === "code") {
+      const hostedGuess = hosted || window.location.hostname.endsWith(".vercel.app") || window.location.hostname === "chat.hyzr.ai";
+      if (hostedGuess && !agentPaired) {
+        let hostedNow: boolean = hostedGuess;
+        let connectedNow: boolean = agentPaired;
+        try {
+          const setupResponse = await fetch("/api/setup", { cache: "no-store" });
+          if (setupResponse.ok) {
+            const setup = await setupResponse.json();
+            hostedNow = Boolean(setup.hosted);
+            connectedNow = Boolean(setup.agentConnected);
+            setHosted(hostedNow);
+            setAgentPaired(connectedNow);
+            setAgentInfo(setup.agent || null);
+          }
+        } catch {}
+        if (hostedNow && !connectedNow) { openPair(); return; }
+      }
+    }
     busyRef.current = true;
     setView("chat");
     const base = baseMessages ?? messages;
@@ -1521,9 +1542,9 @@ export default function Home() {
         return copy;
       });
       if (!pairedNow && !agentNow) {
-        applyRelay(agentNow
-          ? "Hyzr is offline. Reopen **hyzr.cmd** on your computer and leave the terminal open."
-          : "Connect your computer first — download the tiny Hyzr terminal launcher and enter the code it asks for.", false);
+        // Disconnected mid-send: drop the pending turn and prompt to connect,
+        // rather than leaving a "you're not paired" reply in the thread.
+        setMessages(base);
         setBusy(false); busyRef.current = false; openPair();
         return;
       }
@@ -2323,11 +2344,6 @@ export default function Home() {
   const visibleMessages = hiddenMessageCount ? messages.slice(hiddenMessageCount) : messages;
   const activeTaskRuns = taskRuns.filter((run) => run.status === "running");
   const showBackgroundRun = activeTaskRuns.length > 0 && view !== "tasks";
-  const pairedToolLabel = [
-    agentInfo?.claude && "Claude",
-    agentInfo?.codex && "Codex",
-    agentInfo?.git && "Git",
-  ].filter(Boolean).join(" · ");
 
   return (
     <div className="app">
@@ -2352,12 +2368,6 @@ export default function Home() {
           <span className="new-plus"><IconPlus size={16} /></span><span>{workMode === "chat" ? "New chat" : "New"}</span>
         </button>
         {workMode === "code" && <div className="nav primary-nav">
-          <button
-            className={`nav-btn ${view === "chat" ? "active" : ""}`}
-            onClick={() => openView("chat")}
-          >
-            <IconChat size={16} /> Chat
-          </button>
           <button
             className={`nav-btn ${view === "github" ? "active" : ""}`}
             onClick={() => openView("github")}
@@ -2527,17 +2537,6 @@ export default function Home() {
             <button className={mode === "local" ? "on" : ""} onClick={() => switchMode("local")} title="Use local subscriptions">Local</button>
             <button className={mode === "byok" ? "on" : ""} onClick={() => switchMode("byok")} title="Use API keys">API</button>
           </div>}
-          {workMode === "code" && (
-            <button
-              className={`agent-presence ${agentPaired ? "online" : "offline"}`}
-              onClick={() => requireAuth(() => openPair())}
-              title={agentPaired ? `Connected to ${agentInfo?.host || "your computer"}` : agentInfo ? "Reopen Hyzr on your computer" : "Connect your computer"}
-            >
-              <i />
-              <span>{agentPaired ? agentInfo?.host || "Computer connected" : agentInfo ? "Computer offline" : "Connect computer"}</span>
-              <IconChevron size={11} />
-            </button>
-          )}
           <div className="top-links">
             <a className="top-link" href="https://code.hyzr.ai" target="_blank" rel="noopener" title="Learn to code — Hyzr Code">
               Code <IconExternal size={12} />
@@ -2606,16 +2605,7 @@ export default function Home() {
             </div>
             {composer}
             {incognito && <p className="incognito-note">Sessions you create won’t be saved to your history.</p>}
-            {workMode === "code" && (agentPaired ? (
-              <button className="agent-ready-card" onClick={openPair}>
-                <span className="agent-ready-icon"><IconTerminal size={15} /></span>
-                <span className="agent-ready-copy">
-                  <b>Connected to {agentInfo?.host || "your computer"}</b>
-                  <span>{pairedToolLabel || "Local tools ready"}</span>
-                </span>
-                <span className="agent-ready-manage">Manage <IconChevron size={11} /></span>
-              </button>
-            ) : (
+            {workMode === "code" && !agentPaired && (
               <div className={`pair-cta ${agentInfo ? "known-offline" : ""}`}>
                 <IconTerminal size={20} />
                 <span className="pair-cta-text">
@@ -2629,7 +2619,7 @@ export default function Home() {
                   <button className="pair-cta-btn" onClick={openPair}>{agentInfo ? "Reconnect" : "Pair"}</button>
                 </span>
               </div>
-            ))}
+            )}
           </div>
         ) : (
           <>
@@ -2802,8 +2792,10 @@ export default function Home() {
                     <p>Open <code>{downloadPlatform === "windows" ? "hyzr.cmd" : "hyzr"}</code>. Every launch creates a fresh one-time code and opens its secure approval page.</p>
                   </div>
                   <div className="pair-offline-actions">
-                    <button onClick={openPair} disabled={pairLoading}>{pairLoading ? "Checking…" : "Check again"}</button>
-                    <a href={`/api/agent/download?platform=${downloadPlatform}`}>Download again</a>
+                    <a className="pair-offline-download" href={`/api/agent/download?platform=${downloadPlatform}`}>
+                      {downloadPlatform === "windows" ? <IconWindows size={14} /> : <IconTerminal size={14} />} Download
+                    </a>
+                    <button className="pair-offline-reconnect" onClick={openPair} disabled={pairLoading}>{pairLoading ? "Checking…" : "Reconnect"}</button>
                   </div>
                 </div>
               ) : (

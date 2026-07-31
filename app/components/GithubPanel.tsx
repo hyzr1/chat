@@ -144,7 +144,7 @@ export default function GithubPanel({
                 <span className="spinner" /> Loading repositories…
               </div>
             )}
-            {error && !repos && <div className="integration-empty"><span><IconGithub size={20} /></span><h2>GitHub CLI unavailable</h2><p>{error}. Hyzr uses the <code>gh</code> sign-in already present on your paired computer.</p><button className="integration-connect" onClick={() => void loadRepositories()}>Retry GitHub <IconArrowRight size={13} /></button><a href="/api/integrations/github/install">Use the GitHub App instead</a></div>}
+            {error && !repos && <div className="integration-empty"><span><IconGithub size={20} /></span><h2>GitHub CLI unavailable</h2><p>{error}. Hyzr uses the <code>gh</code> sign-in already present on your paired computer.</p><button className="integration-connect" onClick={() => void loadRepositories()}>Retry GitHub <IconArrowRight size={13} /></button></div>}
             {repos && <div className="github-toolbar"><div className="search-box"><IconSearch size={14} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a repository" /></div><span>{visibleRepos.length} repositories</span></div>}
             <div className="repo-grid">
             {visibleRepos.map((r) => (

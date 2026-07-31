@@ -4899,9 +4899,13 @@ select {
 .pair-offline strong { display: block; margin-bottom: 3px; font-size: 12.5px; font-weight: 620; }
 .pair-offline p { margin: 0; color: var(--text-faint); font-size: 10.5px; line-height: 1.45; }
 .pair-offline code { color: var(--text-soft); font-family: var(--font-mono); }
-.pair-offline > .pair-offline-actions { grid-column: 2; display: flex; gap: 7px; }
-.pair-offline-actions > button,.pair-offline-actions > a { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel); color: var(--text); font: 550 10.5px/1 var(--font-sans); text-decoration: none; cursor: pointer; }
-.pair-offline-actions > button:disabled { opacity: .55; cursor: default; }
+.pair-offline > .pair-offline-actions { grid-column: 2; display: flex; gap: 7px; margin-top: 2px; }
+.pair-offline-download { min-height: 33px; display: inline-flex; align-items: center; gap: 6px; padding: 0 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel); color: var(--text); font: 550 11.5px/1 var(--font-sans); text-decoration: none; cursor: pointer; transition: background .13s ease, border-color .13s ease; }
+.pair-offline-download:hover { background: var(--panel-2); border-color: var(--text-faint); }
+.pair-offline-download svg { color: var(--text-soft); }
+.pair-offline-reconnect { min-height: 33px; display: inline-flex; align-items: center; justify-content: center; padding: 0 14px; border: 0; border-radius: 8px; background: var(--text); color: var(--bg); font: 600 11.5px/1 var(--font-sans); cursor: pointer; transition: opacity .13s ease; }
+.pair-offline-reconnect:hover { opacity: .9; }
+.pair-offline-reconnect:disabled { opacity: .55; cursor: default; }
 .pair-tools { display: grid; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .pair-tool { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .pair-tool:last-child { border-bottom: 0; }
