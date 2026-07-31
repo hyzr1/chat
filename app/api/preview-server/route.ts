@@ -169,6 +169,9 @@ export async function POST(req: NextRequest) {
     servers.set(sessionId, record);
     return NextResponse.json({ url: `http://${hostname}:${record.port}`, port: record.port, hostname });
   } catch (error: any) {
-    return NextResponse.json({ error: error?.message ?? "Could not start project server" }, { status: 500 });
+    // Surface the real reason (paired agent errors carry a status) instead of a
+    // blanket 500, so preview failures are diagnosable from the network tab.
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    return NextResponse.json({ error: error?.message ?? "Could not start project server", reason: error?.reason }, { status });
   }
 }

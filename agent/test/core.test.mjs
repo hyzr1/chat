@@ -93,16 +93,19 @@ test("preview discovery selects a private LAN address only", () => {
   }), null);
 });
 
-test("static projects never cause Preview to create a substitute server", async () => {
+test("static projects are served by the built-in static preview server", async () => {
+  // The common case: plain index.html with no dev server. Previously this
+  // REJECTED, so Preview 500'd for every static build. Now we serve it.
   const root = await mkdtemp(path.join(os.tmpdir(), "hyzr-static-preview-"));
   const workspace = path.join(root, "static-chat");
   await mkdir(workspace);
   await writeFile(path.join(workspace, "index.html"), "<!doctype html><h1>Direct local preview</h1>");
   try {
-    await assert.rejects(
-      () => __test.startPreviewServer({ workspaceRoot: root, tools: {} }, "static-chat"),
-      /No running project server was detected/,
-    );
+    const result = await __test.startPreviewServer({ workspaceRoot: root, tools: {} }, "static-chat");
+    assert.ok(result.port >= 3001 && result.port < 3100, `served on a preview port, got ${result.port}`);
+    assert.equal(result.static, true, "flagged as a static preview");
+    const body = await (await fetch(`http://127.0.0.1:${result.port}/`)).text();
+    assert.match(body, /Direct local preview/, "the file is actually served");
   } finally {
     __test.sweepPreviewServers(true);
     await rm(root, { recursive: true, force: true });

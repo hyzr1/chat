@@ -1,5 +1,6 @@
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { createServer as createHttpServer } from "node:http";
 import { copyFile, mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -668,6 +669,60 @@ async function probePreviewPort(port) {
   }
 }
 
+const STATIC_MIME = {
+  ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml",
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+  ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".woff": "font/woff", ".woff2": "font/woff2",
+};
+
+// The servable root for a static site: the build output dir if it has an
+// index.html, else the workspace itself. null ⇒ nothing to preview.
+async function staticProjectRoot(workspace) {
+  for (const dir of ["dist", "build", "out"]) {
+    const candidate = path.join(workspace, dir);
+    try { await stat(path.join(candidate, "index.html")); return candidate; } catch {}
+  }
+  try { await stat(path.join(workspace, "index.html")); return workspace; } catch {}
+  return null;
+}
+
+// Serve a static project on the first free port in 3001–3099 (0.0.0.0 so a phone
+// on the LAN can reach it). Mirrors the hosted /api/preview-server file handler.
+async function serveStaticProject(root) {
+  const base = path.resolve(root);
+  const server = createHttpServer(async (req, res) => {
+    try {
+      const pathname = decodeURIComponent(new URL(req.url ?? "/", "http://localhost").pathname);
+      const relative = pathname.replace(/^\/+/, "") || "index.html";
+      let file = path.resolve(base, relative);
+      if (file !== base && !file.startsWith(base + path.sep)) { res.writeHead(400).end("Bad path"); return; }
+      try {
+        const st = await stat(file);
+        if (st.isDirectory()) file = path.join(file, "index.html");
+        await stat(file);
+      } catch {
+        if (path.extname(relative)) { res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }); res.end("Not found"); return; }
+        file = path.join(base, "index.html"); // client-side routes fall back to the entry doc
+      }
+      const data = await readFile(file);
+      res.writeHead(200, { "Content-Type": STATIC_MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+      res.end(data);
+    } catch { res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }); res.end("Not found"); }
+  });
+  for (let port = 3001; port < 3100; port++) {
+    const ok = await new Promise((resolve) => {
+      const onError = () => { server.off("listening", onListening); resolve(false); };
+      const onListening = () => { server.off("error", onError); resolve(true); };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(port, "0.0.0.0");
+    });
+    if (ok) { server.unref(); return { server, port }; }
+  }
+  throw new Error("No free preview port between 3001 and 3099.");
+}
+
 async function startPreviewServer(context, workspaceId) {
   const workspace = safeWorkspace(context.workspaceRoot, workspaceId);
   const id = cleanId(workspaceId);
@@ -699,8 +754,18 @@ async function startPreviewServer(context, workspaceId) {
       return previewDetails(declaredPort, { reused: true, attached: true, static: false }, lanAvailable);
     }
   }
+  // Static site (index.html with no dev server, e.g. plain HTML/CSS/JS): serve
+  // the files ourselves. This is the most common project shape — previously it
+  // errored with "no running server", so Preview 500'd for every static build.
+  const staticRoot = await staticProjectRoot(workspace);
+  if (staticRoot) {
+    const { server, port } = await serveStaticProject(staticRoot);
+    const networkHost = privateLanAddress();
+    previewServers.set(id, { child: null, server, port, workspace, startedAt: Date.now(), lastUsed: Date.now(), attached: false, lanAvailable: !!networkHost });
+    return previewDetails(port, { reused: false, static: true }, !!networkHost);
+  }
   if (!declaredPort) {
-    throw new Error("No running project server was detected. Start one with Claude or Codex on a specific port, then open Preview.");
+    throw new Error("Nothing to preview yet — no index.html and no running dev server were found in this project.");
   }
   throw new Error(`No server is listening on the requested port ${declaredPort}. Preview never starts a server or substitutes a different port.`);
 }
