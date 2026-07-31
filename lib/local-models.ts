@@ -181,8 +181,8 @@ export function capabilityProfile(id: string): CapabilityProfile {
 // this — not raw token count — to break ties toward the least subscription drain.
 export const PLAN_USAGE_WEIGHT: Record<string, number> = {
   "claude-haiku": 0.33, "claude-sonnet": 1.0, "claude-sonnet-4-6": 0.9,
-  "claude-opus": 3.5, "claude-opus-4-7": 3.3, "claude-opus-4-6": 3.2, "claude-opus-3": 4.5, "claude-fable": 8.0,
-  "gpt-5.4-mini": 0.4, "gpt-5.6-luna": 0.1, "gpt-5.4": 2.5, "gpt-5.6-terra": 1.0, "gpt-5.5": 8.0, "gpt-5.6-sol": 10.0,
+  "claude-opus": 3.5, "claude-opus-4-7": 3.3, "claude-opus-4-6": 3.2, "claude-opus-3": 4.5, "claude-fable": 12.0,
+  "gpt-5.4-mini": 0.4, "gpt-5.6-luna": 0.1, "gpt-5.4": 2.5, "gpt-5.6-terra": 1.0, "gpt-5.5": 7.0, "gpt-5.6-sol": 8.0,
 };
 export function planUsageWeight(id: string): number { return PLAN_USAGE_WEIGHT[id] ?? 1; }
 
@@ -213,7 +213,7 @@ export const MODEL_BASE_QUALITY: Record<string, number> = {
 };
 
 export const CAPABILITY_QUALITY_ADJUST: Partial<Record<TaskCapability, Record<string, number>>> = {
-  frontend_design: { "claude-fable": 0.4, "claude-opus": 0.3, "gpt-5.6-sol": 0.2, "claude-sonnet": 0.2, "gpt-5.6-terra": 0.1, "gpt-5.6-luna": -0.4, "claude-haiku": -0.6, "gpt-5.4-mini": -1.8 },
+  frontend_design: { "claude-fable": 0.4, "claude-opus": 0.3, "claude-sonnet": 0.2, "gpt-5.6-sol": -0.2, "gpt-5.6-terra": -0.1, "gpt-5.6-luna": -0.5, "claude-haiku": -0.6, "gpt-5.4-mini": -1.8 },
   architecture: { "gpt-5.6-sol": 0.4, "claude-opus": 0.4, "claude-fable": 0.3, "gpt-5.5": 0.3, "claude-sonnet": -0.2, "gpt-5.6-luna": -0.8, "claude-haiku": -1.4, "gpt-5.4-mini": -1.8 },
   debugging: { "claude-fable": 0.4, "claude-sonnet": 0.3, "gpt-5.6-sol": 0.2, "claude-haiku": 0.0, "gpt-5.4-mini": -1.2 },
   code_review: { "claude-fable": 0.4, "claude-opus": 0.3, "claude-sonnet": 0.2, "gpt-5.6-sol": 0.1, "gpt-5.4-mini": -1.0 },

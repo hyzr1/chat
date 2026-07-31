@@ -15,8 +15,8 @@ type Tier = "trivial" | "standard" | "hard";
 // their reasoning-token inflation is baked in; Opus ~3.5×; light models ≪ 1.
 export const PLAN_USAGE_WEIGHT: Record<string, number> = {
   "claude-haiku": 0.33, "claude-sonnet": 1.0, "claude-sonnet-4-6": 0.9,
-  "claude-opus": 3.5, "claude-opus-4-7": 3.3, "claude-opus-4-6": 3.2, "claude-opus-3": 4.5, "claude-fable": 8.0,
-  "gpt-5.4-mini": 0.4, "gpt-5.6-luna": 0.1, "gpt-5.4": 2.5, "gpt-5.6-terra": 1.0, "gpt-5.5": 8.0, "gpt-5.6-sol": 10.0,
+  "claude-opus": 3.5, "claude-opus-4-7": 3.3, "claude-opus-4-6": 3.2, "claude-opus-3": 4.5, "claude-fable": 12.0,
+  "gpt-5.4-mini": 0.4, "gpt-5.6-luna": 0.1, "gpt-5.4": 2.5, "gpt-5.6-terra": 1.0, "gpt-5.5": 7.0, "gpt-5.6-sol": 8.0,
 };
 export const planUsageWeight = (id?: string): number => (id && PLAN_USAGE_WEIGHT[id]) || 1;
 

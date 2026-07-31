@@ -21,8 +21,8 @@ const MODELS = {
 const CORE = Object.keys(MODELS);
 
 const PLAN_USAGE_WEIGHT = {
-  "claude-haiku": 0.33, "claude-sonnet": 1.0, "claude-opus": 3.5, "claude-fable": 8.0,
-  "gpt-5.4-mini": 0.4, "gpt-5.6-luna": 0.1, "gpt-5.4": 2.5, "gpt-5.6-terra": 1.0, "gpt-5.5": 8.0, "gpt-5.6-sol": 10.0,
+  "claude-haiku": 0.33, "claude-sonnet": 1.0, "claude-opus": 3.5, "claude-fable": 12.0,
+  "gpt-5.4-mini": 0.4, "gpt-5.6-luna": 0.1, "gpt-5.4": 2.5, "gpt-5.6-terra": 1.0, "gpt-5.5": 7.0, "gpt-5.6-sol": 8.0,
 };
 const usageWeight = (id) => PLAN_USAGE_WEIGHT[id] ?? 1;
 
@@ -32,7 +32,7 @@ const BASE_QUALITY = {
 };
 
 const CAP_ADJ = {
-  frontend_design: { "claude-fable": 0.4, "claude-opus": 0.3, "gpt-5.6-sol": 0.2, "claude-sonnet": 0.2, "gpt-5.6-terra": 0.1, "gpt-5.6-luna": -0.4, "claude-haiku": -0.6, "gpt-5.4-mini": -1.8 },
+  frontend_design: { "claude-fable": 0.4, "claude-opus": 0.3, "claude-sonnet": 0.2, "gpt-5.6-sol": -0.2, "gpt-5.6-terra": -0.1, "gpt-5.6-luna": -0.5, "claude-haiku": -0.6, "gpt-5.4-mini": -1.8 },
   architecture: { "gpt-5.6-sol": 0.4, "claude-opus": 0.4, "claude-fable": 0.3, "gpt-5.5": 0.3, "claude-sonnet": -0.2, "gpt-5.6-luna": -0.8, "claude-haiku": -1.4, "gpt-5.4-mini": -1.8 },
   debugging: { "claude-fable": 0.4, "claude-sonnet": 0.3, "gpt-5.6-sol": 0.2, "gpt-5.4-mini": -1.2 },
   code_review: { "claude-fable": 0.4, "claude-opus": 0.3, "claude-sonnet": 0.2, "gpt-5.6-sol": 0.1, "gpt-5.4-mini": -1.0 },
