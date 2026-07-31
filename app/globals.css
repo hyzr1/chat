@@ -2164,8 +2164,8 @@ select {
   .background-run { width: 34px; min-width: 34px; padding: 0; justify-content: center; }
   .background-run > span:last-child { display: none; }
   .center {
-    justify-content: flex-start;
-    padding: clamp(105px, 18vh, 150px) 12px 20px;
+    justify-content: center;
+    padding: 24px 14px calc(24px + env(safe-area-inset-bottom, 0px));
   }
   .home-intro { margin-bottom: 18px; }
   .home-mark { width: 32px; height: 32px; margin-bottom: 14px; }
@@ -5336,4 +5336,19 @@ select {
     margin:3px 5px 5px 30px;
     box-shadow:none;
   }
+}
+
+/* Mobile composer toolbar — keep it to one tidy row. The Agent-mode row was
+   cramming attach + mode pills + Plan + model + effort + mic + send together.
+   Tighten the mode pills and drop the two most secondary controls (Plan, and
+   the mic in Agent mode) so the essential controls breathe and never overflow. */
+@media (max-width: 760px) {
+  .composer-row { gap: 5px; flex-wrap: nowrap; }
+  .composer-modes { flex: 0 1 auto; min-width: 0; gap: 2px; }
+  .cm-pill { height: 34px; padding: 0 11px; gap: 5px; font-size: 12.5px; }
+  .cm-pill svg { flex: 0 0 auto; }
+  :root[data-workmode="code"] .composer-row > .tool-btn { display: none; }   /* Plan */
+  :root[data-workmode="code"] .composer-row > .round-btn { display: none; }  /* mic */
+  .model-controls { flex: 0 1 auto; min-width: 0; margin-left: auto; }
+  .send { flex: 0 0 34px; }
 }

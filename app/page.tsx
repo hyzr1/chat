@@ -738,8 +738,10 @@ export default function Home() {
     const root = document.documentElement;
     const viewport = window.visualViewport;
     const syncViewport = () => {
-      const height = viewport?.height ?? window.innerHeight;
-      root.style.setProperty("--app-height", `${Math.round(height)}px`);
+      // Fall back on a falsy 0 (some embedded/edge cases report height 0, which
+      // would otherwise collapse the whole app to zero height).
+      const height = viewport?.height || window.innerHeight || 0;
+      if (height > 0) root.style.setProperty("--app-height", `${Math.round(height)}px`);
     };
     const timers = new Set<number>();
     const settleViewport = () => {
