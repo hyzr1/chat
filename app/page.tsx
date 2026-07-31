@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MODELS } from "@/lib/models";
 import { CAPABILITY_LABELS, LOCAL_MODELS, LOCAL_TIER_DEFAULT, capabilityProfile, type TaskCapability } from "@/lib/local-models";
+import { projectPlan } from "@/lib/deep-plan";
 import Markdown from "./components/Markdown";
 import WorkIntakePanel from "./components/WorkIntakePanel";
 import ProofPanel from "./components/ProofPanel";
@@ -2271,6 +2272,16 @@ export default function Home() {
         </div>
         <div className="spacer" />
         {workMode === "code" && <div className="model-controls">
+          <button
+            className={`tool-btn deep-toggle ${planOn ? "active" : ""}`}
+            onClick={() => setPlanOn((p) => !p)}
+            title={planOn
+              ? "Deep Planning is ON — splits your request into subtasks and runs each on the model best suited to it (from your enabled pool), spreading load across both plans to spend less subscription usage."
+              : "Deep Planning — split into subtasks, best model per part from your pool, less usage."}
+            aria-pressed={planOn}
+          >
+            <IconSparkles size={14} /> <span className="deep-label">Deep</span>
+          </button>
           <div className="model-picker" style={{ position: "relative" }}>
             <button
               className={`tool-btn model-trigger ${override !== "auto" ? "active" : ""}`}
@@ -3319,88 +3330,60 @@ function RunTelemetry({ msg }: { msg: Msg }) {
   );
 }
 
-function RoutingTree({ msg }: { msg: Msg }) {
+// Deep Plan card — the decomposition decision map: how the request was split,
+// which model each part runs on and why, the live per-plan subscription-usage
+// split, and how much less plan usage it spends than one big model.
+function DeepPlanCard({ msg }: { msg: Msg }) {
   const a = msg.analysis!;
   const streaming = msg.streaming;
+  const proj = projectPlan(a.subtasks);
+  const totalUsage = proj.claudeUsage + proj.codexUsage;
+  const claudePct = totalUsage ? Math.round((proj.claudeUsage / totalUsage) * 100) : 0;
+  const codexPct = totalUsage ? 100 - claudePct : 0;
+  const savePct = Math.round(proj.savingsRate * 100);
   return (
-    <div className="plan-card">
-      <div className="plan-h">
-        <IconRoute size={14} /> Routing plan
-        {streaming && (
-          <span className="plan-live">
-            <span className="spinner" style={{ width: 12, height: 12 }} />
-            {msg.status ?? "Working"}
-          </span>
-        )}
+    <div className="dplan">
+      <div className="dplan-head">
+        <span className="dplan-ic"><IconRoute size={13} /></span>
+        <strong>Deep plan</strong>
+        <span className="dplan-sub">{a.subtasks.length} subtask{a.subtasks.length > 1 ? "s" : ""} · {proj.modelsUsed || a.subtasks.length} model{(proj.modelsUsed || a.subtasks.length) > 1 ? "s" : ""}</span>
+        {streaming
+          ? <span className="dplan-live"><span className="spinner" style={{ width: 11, height: 11 }} />{a.preliminary ? "Planning" : (msg.status ?? "Working")}</span>
+          : savePct > 0 && <span className="dplan-save" title="Projected reduction in subscription usage vs. running the whole request on your heaviest model">~{savePct}% less usage</span>}
       </div>
-      <RunTelemetry msg={msg} />
-      {msg.contract && <details className="run-contract"><summary><span><IconShield size={13} /> Delivery contract</span><em>{msg.contract.acceptanceCriteria.length} checks · {msg.contract.budget.tokenBudget.toLocaleString()} token ceiling</em><IconChevron size={12} /></summary><div><strong>{msg.contract.objective}</strong><ul>{msg.contract.acceptanceCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul><small>Evidence: {msg.contract.evidence.join(" · ")}</small></div></details>}
-      <div className="tree">
-        <div className="tree-root">
-          <span className="node-ic">
-            <HyzrMark size={15} />
-          </span>
-          {a.intent}
-        </div>
-        <div className="tree-branches">
-          <div className="tree-node done">
-            <span className="node-ic">
-              <BrandMark brand="openai" size={15} />
-            </span>
-            <div className="node-body">
-              <div className="node-title">Planner · GPT-5.4 Mini</div>
-              <div className="node-sub">Classifies workload, tools, modality, and priorities</div>
-            </div>
-            <span className="node-state">
-              {a.preliminary ? (
-                <>
-                  <span className="spinner" style={{ width: 11, height: 11 }} /> analyzing
-                </>
-              ) : (
-                <>
-                  <IconCheck size={12} /> analyzed
-                </>
-              )}
-            </span>
-          </div>
-          {a.subtasks.map((st, i) => {
-            const tm = st.modelId ? LOCAL_MODELS[st.modelId] : tierModel(st.tier);
-            const state = st.status ?? (!streaming ? "done" : "queued");
-            return (
-              <div className={`tree-node ${state}`} key={i}>
-                <span className="node-ic">
-                  <BrandMark brand={brandFor(tm?.engine ?? "")} size={15} />
-                </span>
-                <div className="node-body">
-                  <div className="node-title">
-                    {st.title}
-                  </div>
-                  <div className="node-sub">
-                    <span className="capability-chip">{st.capability ? CAPABILITY_LABELS[st.capability] : "General execution"}</span>
-                    {st.routingTrace && <span className={`route-source ${st.routingTrace.source}`}>{st.routingTrace.source === "adaptive" ? "Evidence-backed" : st.routingTrace.source === "custom" ? "Your priority" : st.routingTrace.source === "provider" ? "Provider constraint" : "Cost default"}</span>}
-                    <span className="node-model">{tm?.label} · {tm?.plan}</span>
-                  </div>
-                  {st.rationale && <div className="node-why">{st.rationale}</div>}
-                  {st.routingTrace && st.routingTrace.candidates.some((candidate) => candidate.attempts > 0) && <details className="route-evidence"><summary>Decision evidence · {st.routingTrace.sampleCount} comparable outcomes <IconChevron size={10} /></summary><div>{st.routingTrace.candidates.filter((candidate) => candidate.attempts > 0).slice(0, 4).map((candidate) => <span key={candidate.modelId}><b>{LOCAL_MODELS[candidate.modelId]?.label ?? candidate.modelId}</b><em>{candidate.attempts} runs · {candidate.successRate == null ? "—" : `${Math.round(candidate.successRate * 100)}%`} accepted · {candidate.averageTokens == null ? "—" : `${Math.round(candidate.averageTokens).toLocaleString()} tok`}</em></span>)}</div></details>}
+      <div className="dplan-tasks">
+        {a.subtasks.map((st, i) => {
+          const tm = st.modelId ? LOCAL_MODELS[st.modelId] : tierModel(st.tier);
+          const state = st.status ?? (!streaming ? "done" : "queued");
+          return (
+            <div className={`dplan-task ${state}`} key={i}>
+              <span className="dplan-brand"><BrandMark brand={brandFor(tm?.engine ?? "")} size={15} /></span>
+              <div className="dplan-body">
+                <div className="dplan-title">{st.title}</div>
+                <div className="dplan-metaline">
+                  <span className="dplan-cap">{st.capability ? CAPABILITY_LABELS[st.capability] : "General"}</span>
+                  <span className={`dplan-model ${tm?.engine === "claude" ? "claude" : "codex"}`}>{tm?.label}</span>
+                  <span className="dplan-plan">{tm?.plan}</span>
                 </div>
-                <span className="node-state">
-                  {state === "done" ? (
-                    <>
-                      <IconCheck size={12} /> done
-                    </>
-                  ) : state === "active" ? (
-                    <>
-                      <span className="spinner" style={{ width: 11, height: 11 }} /> running
-                    </>
-                  ) : (
-                    "queued"
-                  )}
-                </span>
+                {st.rationale && <div className="dplan-why">{st.rationale}</div>}
               </div>
-            );
-          })}
-        </div>
+              <span className="dplan-state">
+                {state === "done" ? <IconCheck size={13} /> : state === "active" ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <span className="dplan-queued" />}
+              </span>
+            </div>
+          );
+        })}
       </div>
+      {claudePct > 0 && codexPct > 0 && (
+        <div className="dplan-split">
+          <div className="dplan-bar"><span className="dpb-claude" style={{ width: `${claudePct}%` }} /><span className="dpb-codex" style={{ width: `${codexPct}%` }} /></div>
+          <div className="dplan-legend">
+            <span className="dpl-c">Claude Max · {claudePct}%</span>
+            <span className="dpl-x">ChatGPT Pro · {codexPct}%</span>
+          </div>
+        </div>
+      )}
+      {(msg.usage || msg.providerCalls) && <RunTelemetry msg={msg} />}
     </div>
   );
 }
@@ -3494,7 +3477,7 @@ function MessageView({
         Hyzr Chat
       </div>
 
-      {msg.analysis && <RoutingTree msg={msg} />}
+      {msg.analysis && <DeepPlanCard msg={msg} />}
 
       {!msg.analysis && msg.contract && <details className="run-contract standalone"><summary><span><IconShield size={13} /> Delivery contract</span><em>{msg.contract.acceptanceCriteria.length} checks</em><IconChevron size={12} /></summary><div><strong>{msg.contract.objective}</strong><ul>{msg.contract.acceptanceCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul></div></details>}
 

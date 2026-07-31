@@ -5416,3 +5416,46 @@ select {
   /* Sidebar search text was inflated to 16px by the global input rule. */
   .hist-search input { font-size: 13.5px !important; }
 }
+
+/* ---------------- Deep Planning: toolbar toggle + decision-map card ---------------- */
+.deep-toggle { gap: 5px; }
+.deep-toggle.active { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-ink); }
+.deep-toggle.active svg { color: var(--accent-ink); }
+
+.dplan { margin: 10px 0 4px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); overflow: hidden; }
+.dplan-head { display: flex; align-items: center; gap: 8px; padding: 11px 13px; border-bottom: 1px solid var(--border); }
+.dplan-ic { width: 22px; height: 22px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 7px; background: var(--accent-soft); color: var(--accent-ink); }
+.dplan-head strong { font-size: 13px; font-weight: 620; }
+.dplan-sub { color: var(--text-faint); font-size: 11px; }
+.dplan-live { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--text-soft); font-size: 11.5px; }
+.dplan-save { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent); padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.dplan-tasks { padding: 3px 6px; }
+.dplan-task { display: grid; grid-template-columns: 22px minmax(0,1fr) auto; gap: 10px; align-items: start; padding: 10px 8px; }
+.dplan-task + .dplan-task { border-top: 1px solid var(--border); }
+.dplan-task.active { background: var(--accent-soft); border-radius: 9px; }
+.dplan-brand { width: 22px; height: 22px; display: grid; place-items: center; margin-top: 1px; }
+.dplan-body { min-width: 0; }
+.dplan-title { font-size: 13px; font-weight: 520; color: var(--text); overflow-wrap: anywhere; }
+.dplan-metaline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 4px; }
+.dplan-cap { font-size: 9.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+.dplan-model { font-size: 11.5px; font-weight: 620; }
+.dplan-model.claude { color: #d97757; }
+.dplan-model.codex { color: #10a37f; }
+:root[data-theme="light"] .dplan-model.codex { color: #0e8f6f; }
+.dplan-plan { font-size: 10.5px; color: var(--text-faint); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
+.dplan-why { margin-top: 5px; color: var(--text-faint); font-size: 11px; line-height: 1.45; }
+.dplan-state { display: grid; place-items: center; min-width: 16px; padding-top: 2px; color: var(--text-faint); }
+.dplan-task.done .dplan-state { color: var(--ok); }
+.dplan-queued { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); opacity: .45; }
+.dplan-split { padding: 11px 13px 13px; border-top: 1px solid var(--border); }
+.dplan-bar { height: 8px; border-radius: 999px; overflow: hidden; display: flex; background: var(--panel-2); border: 1px solid var(--border); }
+.dplan-bar .dpb-claude { background: #d97757; }
+.dplan-bar .dpb-codex { background: #10a37f; }
+.dplan-legend { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; font-weight: 550; }
+.dplan-legend .dpl-c { color: #d97757; }
+.dplan-legend .dpl-x { color: #10a37f; }
+.dplan .run-telemetry { margin: 0; padding: 10px 13px 12px; border-top: 1px solid var(--border); }
+@media (max-width: 760px) {
+  .deep-toggle .deep-label { display: none; }
+  .deep-toggle { flex: 0 0 34px; width: 34px; padding: 0; justify-content: center; }
+}
