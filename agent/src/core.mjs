@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
+import { planForAgent } from "./routing.mjs";
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 3;
@@ -714,58 +715,13 @@ function previewEntry(files) {
   return index?.path || null;
 }
 
+// Quality-first, coherence-first plan (ported engine in routing.mjs). A coupled
+// app is ONE build on the model best-suited to it at the lowest subscription
+// usage; only genuinely independent deliverables (image/video generation) split
+// off. Replaces the old hardcoded over-splitting, which the judged A/B proved
+// broke integration and wasted the frontier on commodity parts.
 function specialistPlan(job, tools) {
-  const prompt = String(job.prompt || "");
-  const text = prompt.toLowerCase();
-  const broad = Boolean(job.plan) && (
-    prompt.length > 220 ||
-    /\b(build|create|make|implement|redesign|migrate)\b[\s\S]{0,80}\b(app|website|platform|system|project|feature)\b/.test(text) ||
-    /\b(end[- ]to[- ]end|production[- ]grade|multiple|multi[- ]step|entire)\b/.test(text)
-  );
-  if (!broad || (!tools.claude && !tools.codex)) return [];
-
-  const tasks = [];
-  if (tools.claude && /\b(ui|ux|frontend|website|web app|design|portfolio|dashboard|landing page|responsive)\b/.test(text)) {
-    tasks.push({
-      label: "Interface and product design",
-      engine: "claude",
-      model: "claude-sonnet",
-      instruction: "Create a concise implementation-ready interface brief. Resolve layout, visual hierarchy, interaction states, accessibility, and responsive behavior. Do not edit files yet.",
-    });
-  }
-  if (tools.codex && /\b(math|formula|algorithm|forecast|prediction|statistics|optimization|simulation)\b/.test(text)) {
-    tasks.push({
-      label: "Technical and mathematical design",
-      engine: "codex",
-      model: "gpt-5.6-sol",
-      instruction: "Derive and check the difficult technical or mathematical part. Produce implementation-ready equations, assumptions, edge cases, and tests. Do not edit files yet.",
-    });
-  }
-  if (tools.codex && /\b(image|background|illustration|logo|photo|texture|graphic|visual asset)\b/.test(text)) {
-    tasks.push({
-      label: "Visual asset generation",
-      engine: "codex",
-      model: "gpt-5.6-terra",
-      instruction: "Create the requested visual asset using an installed image-generation capability if available. Save useful outputs inside the project and report their paths. Do not substitute a text-only description when image generation is available.",
-    });
-  }
-  const implementationEngine = tools.codex ? "codex" : "claude";
-  tasks.push({
-    label: "Implementation",
-    engine: implementationEngine,
-    model: implementationEngine === "codex" ? "gpt-5.6-terra" : "claude-sonnet",
-    instruction: "Implement the complete user request in the current workspace. Use the specialist handoffs below, inspect existing files first, make real file changes, and run the narrowest relevant validation. Do not merely describe code or ask the user to create files.",
-  });
-  if (tasks.length > 1) {
-    const verifierEngine = tools.claude ? "claude" : "codex";
-    tasks.push({
-      label: "Verification and delivery",
-      engine: verifierEngine,
-      model: verifierEngine === "claude" ? "claude-haiku" : "gpt-5.4-mini",
-      instruction: "Independently inspect the implementation against the original request. Run relevant checks, fix concrete problems you find, and finish with a concise user-facing delivery summary including files and verification. Do not claim success without inspecting the workspace.",
-    });
-  }
-  return tasks.slice(0, 4);
+  return planForAgent(job, tools).slice(0, 4);
 }
 
 async function handleRpc(job, context) {
@@ -878,6 +834,23 @@ async function handleRun(job, context) {
   }];
   const handoffs = [];
 
+  // Surface the routed plan so the web renders the Deep plan tree (which model
+  // each part goes to and why). Only when the planner actually produced a route.
+  if (job.plan && planned.length) {
+    const maxTier = planned.reduce((mx, t) => ({ hard: 3, standard: 2, trivial: 1 }[t.tier] > { hard: 3, standard: 2, trivial: 1 }[mx] ? t.tier : mx), "trivial");
+    await context.emit(job.id, "plan", "", {
+      plan: {
+        intent: String(job.prompt || "").replace(/\s+/g, " ").trim().slice(0, 200),
+        complexity: maxTier,
+        strategy: planned.length > 1
+          ? `${planned.length} parts, each on its strong-suit model; coupled work stays coherent, independent assets split off.`
+          : `A single coherent build on ${planned[0].modelLabel}, routed by capability at the lowest subscription usage.`,
+        executorModelId: planned[0].model,
+        subtasks: planned.map((t) => ({ title: t.label, tier: t.tier, capability: t.capability, modelId: t.model, modelLabel: t.modelLabel, rationale: t.rationale })),
+      },
+    });
+  }
+
   for (let index = 0; index < tasks.length; index++) {
     const task = tasks[index];
     // Version the provider session key so an agent upgrade cannot resume a
@@ -891,6 +864,13 @@ async function handleRun(job, context) {
       `${task.label} → ${task.engine === "codex" ? task.model || "Codex" : task.model || "Claude"}`,
       { task: index + 1, totalTasks: tasks.length, engine: task.engine, model: task.model },
     );
+    // Rich task_start so the web tree marks this node active with its model.
+    if (job.plan && planned.length) {
+      await context.emit(job.id, "task_start", "", {
+        index, total: tasks.length, title: task.label, modelId: task.model,
+        modelLabel: task.modelLabel, provider: task.engine, capability: task.capability, tier: task.tier, plan: task.plan,
+      });
+    }
     const handoff = handoffs.length
       ? `\n\nSPECIALIST HANDOFFS\n${handoffs.map((item) => `--- ${item.label} ---\n${item.answer}`).join("\n\n")}`
       : "";
@@ -931,6 +911,9 @@ async function handleRun(job, context) {
       });
     }
     handoffs.push({ label: task.label, answer: String(result.answer || "").slice(0, 12_000) });
+    if (job.plan && planned.length) {
+      await context.emit(job.id, "task_done", "", { index, outcome: "completed", modelId: task.model, title: task.label });
+    }
     if (result.sessionId) {
       sessions[sessionKey] = {
         sessionId: result.sessionId,

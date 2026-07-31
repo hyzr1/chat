@@ -146,20 +146,26 @@ test("Claude text after tool work starts a readable paragraph", () => {
   assert.equal(__test.streamSeparator(""), "");
 });
 
-test("broad product work becomes a bounded mixed-provider specialist graph", () => {
+test("coherence-first: a coupled app is one build; only the image splits off", () => {
+  // Old behavior over-split this into 4 specialist tasks (design/tech/visual/impl)
+  // which judged A/B proved BREAKS integration. Now the coupled app is ONE
+  // coherent build on the best-suited model, and only the genuinely independent
+  // image-generation deliverable splits off to ChatGPT (Claude can't make images).
   const plan = __test.specialistPlan({
     plan: true,
-    prompt: "Build a production-grade responsive weather web app with a generated background image and a difficult forecast formula.",
+    prompt: "Build a production-grade responsive weather web app with a polished UI, and generate a background image.",
   }, { claude: "claude", codex: "codex" });
-  assert.deepEqual(plan.map((task) => task.label), [
-    "Interface and product design",
-    "Technical and mathematical design",
-    "Visual asset generation",
-    "Implementation",
-  ]);
-  assert.ok(plan.some((task) => task.engine === "claude"));
-  assert.ok(plan.some((task) => task.engine === "codex"));
-  assert.ok(plan.length <= 4);
+  assert.equal(plan.length, 2, `expected build + image, got ${plan.map((t) => t.capability).join(", ")}`);
+  const media = plan.find((t) => t.capability === "media_generation");
+  const build = plan.find((t) => t.capability !== "media_generation");
+  assert.ok(build, "one coherent build");
+  assert.equal(build.engine, "claude", "polished app build routes to Claude");
+  assert.ok(media, "the image is its own subtask");
+  assert.equal(media.engine, "codex", "image generation routes to ChatGPT (Claude can't)");
+});
+
+test("a trivial one-off avoids orchestration entirely", () => {
+  assert.deepEqual(__test.specialistPlan({ plan: true, prompt: "change the button padding to 8px" }, { claude: "claude", codex: "codex" }), []);
 });
 
 test("small prompts avoid orchestration overhead", () => {

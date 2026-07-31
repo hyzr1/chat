@@ -21,6 +21,7 @@
   "files": [
     "index.mjs",
     "src/core.mjs",
+    "src/routing.mjs",
     "bin/hyzr",
     "bin/hyzr.cmd"
   ],

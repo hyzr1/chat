@@ -1644,6 +1644,12 @@ export default function Home() {
               if (e.type === "text" && e.text) { ans += e.text; applyRelay(ans, true); }
               else if (e.type === "done") { done = true; }
               else if (e.type === "error") { ans += (ans ? "\n\n" : "") + (e.text || "The agent reported an error."); done = true; }
+              // Planning events (plan / task_start / task_done / route) carry their
+              // payload in `data`; feed them to the same handler the in-browser path
+              // uses so the Deep plan tree renders for paired-agent runs too.
+              else if (["plan", "task_start", "task_done", "route"].includes(e.type)) {
+                applyOrderedEvent({ type: e.type, runId: activeRunId, ...(e.data || {}) });
+              }
             }
             if (done) break;
           }

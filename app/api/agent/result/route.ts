@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
   await touchAgent(token, record);
   const owner = await kvGet<string>(`job-owner:${jobId}`);
   if (owner !== tokenFingerprint(token)) return NextResponse.json({ error: "Unknown job." }, { status: 404 });
-  const allowed = new Set(["status", "text", "tool", "usage", "result", "done", "error"]);
+  const allowed = new Set(["status", "text", "tool", "usage", "result", "done", "error", "plan", "task_start", "task_done", "route"]);
   if (!allowed.has(String(type))) return NextResponse.json({ error: "Unknown result type." }, { status: 400 });
   await queuePush(`results:${jobId}`, {
     type,

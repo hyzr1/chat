@@ -6,7 +6,18 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = path.join(root, "agent", "src", "core.mjs");
 const downloads = path.join(root, "public", "downloads");
-const core = await readFile(source, "utf8");
+const coreRaw = await readFile(source, "utf8");
+
+// The runtime ships as a SINGLE downloaded file, so the agent's local ESM
+// imports (./routing.mjs) must be inlined. Wrap routing in a namespaced IIFE so
+// its top-level names can't collide with core.mjs, and rewrite core's import to
+// destructure from that namespace. routing.mjs is self-contained (no imports).
+const routing = await readFile(path.join(root, "agent", "src", "routing.mjs"), "utf8");
+const routingInlined = `const __hyzrRouting = (() => {\n${routing.replace(/^export\s+/gm, "")}\nreturn { planForAgent };\n})();\n`;
+const core = coreRaw.replace(
+  /import\s*\{\s*planForAgent\s*\}\s*from\s*["']\.\/routing\.mjs["'];?/,
+  "const { planForAgent } = __hyzrRouting;",
+);
 const launcher = `
 
 runAgentCli().catch((error) => {

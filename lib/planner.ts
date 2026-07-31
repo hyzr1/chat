@@ -43,8 +43,11 @@ export async function analyze(userPrompt: string, allowedModelIds?: string[], si
   const raw = decompose(userPrompt);
 
   const subtasks: Subtask[] = raw.map((task) => {
-    const titleSkills = detectSkills(task.title);
-    const cost: CostOptions = { demand, skills: titleSkills.length ? titleSkills : promptSkills };
+    const detected = detectSkills(task.title).length ? detectSkills(task.title) : promptSkills;
+    // Media skills belong only to the media subtask (a build's title is the whole
+    // prompt, so "generate an image" would otherwise zero out Claude for the build).
+    const skills = task.capability === "media_generation" ? detected : detected.filter((s) => s !== "image_gen" && s !== "video_gen");
+    const cost: CostOptions = { demand, skills };
     const routed = selectRoutedModelWithTrace(task.capability, task.tier, allAllowed, routingRules, providerPreference, adaptiveSamples, cost);
     return {
       title: task.title,
