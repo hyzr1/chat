@@ -112,7 +112,12 @@ const GUIDANCE =
   "question, answer directly in your message — do NOT look for or create files. " +
   "Only create, edit, or run files when the user explicitly asks you to build, " +
   "create, scaffold, save, deploy, or run something, or names a specific file. " +
-  "Your working directory is a disposable scratch workspace. Run the commands the user requests and report their actual output and exact URLs without rewriting hostnames or ports. Format answers in Markdown.";
+  "Your working directory is a disposable scratch workspace. Run the commands the user requests and report their actual output and exact URLs without rewriting hostnames or ports. Format answers in Markdown. " +
+  // Craft bar — lifts every model to frontier-level thoroughness so routing to a
+  // cheaper model does not cost quality (targets thin tests and fabricated content).
+  "When you build something, finish it completely: handle edge cases and errors, wire every part together so it actually runs, and leave no stubs, TODOs, or placeholders-as-features. " +
+  "If you write tests, cover the real edge cases and failure modes, not just the happy path. " +
+  "Never fabricate data, results, credentials, customer names, testimonials, logos, or endorsements — use clearly-labeled placeholder content and never present invented facts as real.";
 async function ensureWorkspace(id?: string) {
   const workspace = workspaceFor(id);
   try { await fs.mkdir(workspace, { recursive: true }); } catch {}
