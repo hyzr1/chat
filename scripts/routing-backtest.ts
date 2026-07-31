@@ -6,9 +6,9 @@ process.env.HYZR_CHAT_DISABLE_ADAPTIVE_ROUTING = "1";
 
 const cases = [
   ["Make me a super basic hello world with no styling", "gpt-5.6-luna"],
-  ["Restart the existing dev server and verify the port", "gpt-5.4-mini"],
-  ["Make a quick animation timing change", "gpt-5.4-mini"],
-  ["Build a normal weather web app with an API", "gpt-5.6-terra"],
+  ["Restart the existing dev server and verify the port", "gpt-5.6-luna"],
+  ["Make a quick animation timing change", "claude-sonnet"],
+  ["Build a normal weather web app with an API", "claude-opus"],
   ["Design a production-grade distributed architecture end-to-end", "gpt-5.6-sol"],
   ["Debug an ambiguous race condition across the entire large codebase", "claude-fable"],
   ["Use Claude to redesign this website UI", "claude-opus"],
@@ -31,7 +31,7 @@ const mixed = "User: Make it beautiful. Use Claude for everything besides image 
 const mixedProvider = inferProviderPreference(mixed);
 const codeModel = selectRoutedModel("frontend_design", "standard", undefined, undefined, mixedProvider);
 const imageModel = selectRoutedModel("media_generation", "standard", undefined, undefined, mixedProvider);
-const mixedOk = codeModel === "claude-opus" && imageModel === "gpt-5.6-terra";
+const mixedOk = codeModel === "claude-opus" && imageModel === "gpt-5.6-sol";
 console.log(`${mixedOk ? "PASS" : "FAIL"} | mixed provider constraint | code=${codeModel}, image=${imageModel}`);
 if (!mixedOk) failures++;
 
@@ -42,21 +42,21 @@ console.log(`${contextOk ? "PASS" : "FAIL"} | context budget | ${contextLength} 
 if (!contextOk) failures++;
 
 const feedback: RoutingFeedbackSample[] = [
-  ...Array.from({ length: 4 }, (_, index) => ({ runId: `terra-${index}`, capability: "frontend_design" as const, tier: "standard" as const, modelId: "gpt-5.6-terra", verdict: "needs_work" as const, tokens: 9000, humanEdits: 100, recordedAt: index })),
+  ...Array.from({ length: 4 }, (_, index) => ({ runId: `opus-${index}`, capability: "frontend_design" as const, tier: "standard" as const, modelId: "claude-opus", verdict: "needs_work" as const, tokens: 9000, humanEdits: 100, recordedAt: index })),
   ...Array.from({ length: 4 }, (_, index) => ({ runId: `sonnet-${index}`, capability: "frontend_design" as const, tier: "standard" as const, modelId: "claude-sonnet", verdict: "accepted" as const, tokens: 7000, humanEdits: 0, recordedAt: index })),
 ];
-const learned = rankModelsFromSamples(["gpt-5.6-terra", "claude-sonnet"], "frontend_design", "standard", feedback);
+const learned = rankModelsFromSamples(["claude-opus", "claude-sonnet"], "frontend_design", "standard", feedback);
 const learnedOk = learned.adapted && learned.modelId === "claude-sonnet";
 console.log(`${learnedOk ? "PASS" : "FAIL"} | adaptive routing requires evidence and promotes the stronger accepted model`);
 if (!learnedOk) failures++;
-const sparse = rankModelsFromSamples(["gpt-5.6-terra", "claude-sonnet"], "frontend_design", "standard", feedback.slice(0, 2));
-const sparseOk = !sparse.adapted && sparse.modelId === "gpt-5.6-terra";
+const sparse = rankModelsFromSamples(["claude-opus", "claude-sonnet"], "frontend_design", "standard", feedback.slice(0, 2));
+const sparseOk = !sparse.adapted && sparse.modelId === "claude-opus";
 console.log(`${sparseOk ? "PASS" : "FAIL"} | sparse feedback cannot override the default route`);
 if (!sparseOk) failures++;
 
 delete process.env.HYZR_CHAT_DISABLE_ADAPTIVE_ROUTING;
 const traced = selectRoutedModelWithTrace("frontend_design", "standard", undefined, undefined, "auto", feedback);
-const traceOk = traced.modelId === "claude-sonnet" && traced.trace.adapted && traced.trace.defaultModelId === "gpt-5.6-terra" && traced.trace.sampleCount === 8;
+const traceOk = traced.modelId === "claude-sonnet" && traced.trace.adapted && traced.trace.defaultModelId === "claude-opus" && traced.trace.sampleCount === 8;
 console.log(`${traceOk ? "PASS" : "FAIL"} | decision trace explains an adaptive override without hiding the default`);
 if (!traceOk) failures++;
 const constrained = selectRoutedModelWithTrace("frontend_design", "standard", undefined, undefined, "claude", feedback);

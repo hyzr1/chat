@@ -160,10 +160,16 @@ export function selectRoutedModelWithTrace(capability: TaskCapability, complexit
   let adapted = false;
   let sampleCount = 0;
   let candidates: RoutingDecisionTrace["candidates"] = baseline.ordered.map((candidate) => ({ modelId: candidate, attempts: 0, successRate: null, averageTokens: null, score: null }));
-  if (cost?.bias !== "cheap" && adaptiveSamples.length && !baseline.customPriority && productEnv("HYZR_CHAT_DISABLE_ADAPTIVE_ROUTING", "VMX_DISABLE_ADAPTIVE_ROUTING") !== "1") {
-    const sameTier = baseline.ordered.filter((id) => LOCAL_MODELS[id]?.tier === complexity);
-    if (sameTier.length >= 2) {
-      const learned = rankModelsFromSamples(sameTier, capability, complexity, adaptiveSamples);
+  if (cost?.bias !== "cheap" && adaptiveSamples.length && !baseline.customPriority && baseline.constrainedProvider === "auto" && productEnv("HYZR_CHAT_DISABLE_ADAPTIVE_ROUTING", "VMX_DISABLE_ADAPTIVE_ROUTING") !== "1") {
+    // Feedback is grouped by workload tier, not by a model's catalog tier. A
+    // standard task may legitimately default to a frontier model, so filtering
+    // candidates by LOCAL_MODELS[id].tier made the actual incumbent invisible
+    // to the learner and prevented evidence-backed overrides. Keep the selected
+    // baseline first, then compare it with every configured candidate that has
+    // results for the same kind of work.
+    const candidateIds = [baseline.modelId, ...baseline.ordered.filter((id) => id !== baseline.modelId)];
+    if (candidateIds.length >= 2) {
+      const learned = rankModelsFromSamples(candidateIds, capability, complexity, adaptiveSamples);
       sampleCount = learned.matchingSamples;
       candidates = learned.performance.map((candidate) => ({ modelId: candidate.modelId, attempts: candidate.attempts, successRate: candidate.attempts ? candidate.successRate : null, averageTokens: candidate.averageTokens, score: candidate.attempts ? candidate.score : null }));
       if (learned.adapted) { modelId = learned.modelId; source = "adaptive"; adapted = true; }
@@ -241,6 +247,10 @@ export function detectSkills(prompt: string): Skill[] {
 export function classifyCapability(prompt: string): { capability: TaskCapability; signals: string[] } {
   const text = prompt.toLowerCase();
   const tests: [TaskCapability, RegExp][] = [
+    // Editing an animation in application code is frontend work. Keep this
+    // ahead of media generation so phrases such as "animation timing change"
+    // do not get mistaken for a request to generate a video or image asset.
+    ["frontend_design", /\b(animation|transition|keyframe|gsap|framer[- ]?motion)\b.{0,48}\b(change|tweak|timing|duration|delay|easing|code|css|component)\b|\b(change|tweak|adjust|fix|update)\b.{0,48}\b(animation|transition|keyframe|timing|duration|easing)\b/],
     ["media_generation", /\b(generate|create|make|produce|edit|render|design|draw|animate)\b.{0,72}\b(images?|photos?|illustrations?|videos?|animations?|logos?|icons?|artworks?|graphics?|banners?|sprites?|avatars?|backgrounds?|wallpapers?)\b|\b(images?|videos?|logos?|icons?)\s*(?:generation|gen)\b|\b(icon set|hero image|cover art|splash (?:screen|image))\b/],
     ["architecture", /\b(architecture|system design|data model|scalab|distributed|microservice|technical design)\b/],
     ["debugging", /\b(debug|bug|broken|crash|root cause|race condition|doesn['’]?t work|fix this)\b|\b(fix|resolve|investigate)\b.{0,32}\berror\b/],
