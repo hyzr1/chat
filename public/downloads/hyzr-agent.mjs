@@ -280,7 +280,8 @@ PRINCIPLES:
 - Choose ONLY from the AVAILABLE MODELS list. Each shows its strengths and a usage weight (higher = drains the subscription faster). Among models genuinely equal for a part, prefer the lower usage weight.
 
 OUTPUT: ONLY a JSON object (no markdown, no prose):
-{"subtasks":[{"title":"<short imperative>","capability":"<one of: ${CAPS}>","model":"<exact id from AVAILABLE MODELS>","rationale":"<one sentence: why this model for this part>"}]}`;
+{"analysis":"<1-2 sentences addressed to the user: what you understand the request to be, how hard it is / what the user emphasizes, and WHY you're routing it the way you are>","subtasks":[{"title":"<short imperative>","capability":"<one of: ${CAPS}>","model":"<exact id from AVAILABLE MODELS>","rationale":"<one sentence: why this model for this part>"}]}
+The "analysis" is shown to the user every time, so make it a clear, specific read of THEIR request (e.g. "A Google clone is primarily a polished UI build, so I'm using Opus for high-fidelity frontend without Fable's cost.").`;
 
 function buildRouterPrompt(job, tools) {
   const ids = availableModelIds(job, tools);
@@ -308,6 +309,7 @@ function parseRouterPlan(answer, job, tools) {
     obj = JSON.parse(body.slice(s, e + 1));
   } catch { return null; }
   if (!obj || !Array.isArray(obj.subtasks) || !obj.subtasks.length) return null;
+  const analysis = obj.analysis ? String(obj.analysis).slice(0, 400) : "";
 
   const ids = new Set(availableModelIds(job, tools));
   const codexIds = [...ids].filter((id) => MODELS[id].engine === "codex");
@@ -344,8 +346,8 @@ function parseRouterPlan(answer, job, tools) {
   // Keep at most ONE non-media build (the first) plus any media task.
   const media = tasks.filter((t) => t.capability === "media_generation");
   const build = tasks.filter((t) => t.capability !== "media_generation").slice(0, 1);
-  const final = [...build, ...media];
-  return final.length ? final.slice(0, 4) : null;
+  const final = [...build, ...media].slice(0, 4);
+  return final.length ? { tasks: final, analysis } : null;
 }
 
 // ── Public: build the agent's plan (coherence + quality-first routing) ───────
@@ -1281,7 +1283,9 @@ async function handleRun(job, context) {
   }
   const sessions = await readJson(context.sessionsFile, {});
   // LLM router first (reads intent/emphasis/frustration); deterministic fallback.
-  const planned = (await planWithRouter(job, context)) || specialistPlan(job, context.tools);
+  const routed = await planWithRouter(job, context);
+  const planned = routed && routed.tasks && routed.tasks.length ? routed.tasks : specialistPlan(job, context.tools);
+  const routerAnalysis = (routed && routed.analysis) || "";
   const tasks = planned.length ? planned : [{
     label: "Agent",
     engine: engineFor(job, context.tools),
@@ -1298,9 +1302,11 @@ async function handleRun(job, context) {
       plan: {
         intent: String(job.prompt || "").replace(/\s+/g, " ").trim().slice(0, 200),
         complexity: maxTier,
-        strategy: planned.length > 1
+        // The LLM router's read of the request, shown prominently every time.
+        strategy: routerAnalysis || (planned.length > 1
           ? `${planned.length} parts, each on its strong-suit model; coupled work stays coherent, independent assets split off.`
-          : `A single coherent build on ${planned[0].modelLabel}, routed by capability at the lowest subscription usage.`,
+          : `A single coherent build on ${planned[0].modelLabel}, routed by capability at the lowest subscription usage.`),
+        analysis: routerAnalysis || undefined,
         executorModelId: planned[0].model,
         subtasks: planned.map((t) => ({ title: t.label, tier: t.tier, capability: t.capability, modelId: t.model, modelLabel: t.modelLabel, rationale: t.rationale })),
       },

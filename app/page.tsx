@@ -3348,6 +3348,7 @@ function DeepPlanCard({ msg }: { msg: Msg }) {
           ? <span className="dplan-live"><span className="spinner" style={{ width: 11, height: 11 }} />{a.preliminary ? "Planning" : (msg.status ?? "Working")}</span>
           : savePct > 0 && <span className="dplan-save" title="Projected reduction in subscription usage vs. running the whole request on your heaviest model">~{savePct}% less usage</span>}
       </div>
+      {a.strategy && <div className="dplan-analysis"><IconRoute size={13} /><span>{a.strategy}</span></div>}
       <div className="dplan-tasks">
         {a.subtasks.map((st, i) => {
           const tm = st.modelId ? LOCAL_MODELS[st.modelId] : tierModel(st.tier);

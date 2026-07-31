@@ -279,7 +279,8 @@ PRINCIPLES:
 - Choose ONLY from the AVAILABLE MODELS list. Each shows its strengths and a usage weight (higher = drains the subscription faster). Among models genuinely equal for a part, prefer the lower usage weight.
 
 OUTPUT: ONLY a JSON object (no markdown, no prose):
-{"subtasks":[{"title":"<short imperative>","capability":"<one of: ${CAPS}>","model":"<exact id from AVAILABLE MODELS>","rationale":"<one sentence: why this model for this part>"}]}`;
+{"analysis":"<1-2 sentences addressed to the user: what you understand the request to be, how hard it is / what the user emphasizes, and WHY you're routing it the way you are>","subtasks":[{"title":"<short imperative>","capability":"<one of: ${CAPS}>","model":"<exact id from AVAILABLE MODELS>","rationale":"<one sentence: why this model for this part>"}]}
+The "analysis" is shown to the user every time, so make it a clear, specific read of THEIR request (e.g. "A Google clone is primarily a polished UI build, so I'm using Opus for high-fidelity frontend without Fable's cost.").`;
 
 export function buildRouterPrompt(job, tools) {
   const ids = availableModelIds(job, tools);
@@ -307,6 +308,7 @@ export function parseRouterPlan(answer, job, tools) {
     obj = JSON.parse(body.slice(s, e + 1));
   } catch { return null; }
   if (!obj || !Array.isArray(obj.subtasks) || !obj.subtasks.length) return null;
+  const analysis = obj.analysis ? String(obj.analysis).slice(0, 400) : "";
 
   const ids = new Set(availableModelIds(job, tools));
   const codexIds = [...ids].filter((id) => MODELS[id].engine === "codex");
@@ -343,8 +345,8 @@ export function parseRouterPlan(answer, job, tools) {
   // Keep at most ONE non-media build (the first) plus any media task.
   const media = tasks.filter((t) => t.capability === "media_generation");
   const build = tasks.filter((t) => t.capability !== "media_generation").slice(0, 1);
-  const final = [...build, ...media];
-  return final.length ? final.slice(0, 4) : null;
+  const final = [...build, ...media].slice(0, 4);
+  return final.length ? { tasks: final, analysis } : null;
 }
 
 // ── Public: build the agent's plan (coherence + quality-first routing) ───────

@@ -168,16 +168,17 @@ test("coherence-first: a coupled app is one build; only the image splits off", (
 test("LLM router: valid plan honored; image forced to ChatGPT; over-split collapsed; garbage falls back", () => {
   const tools = { claude: "claude", codex: "codex" };
   const job = { prompt: "build a high quality game and generate a hero image", plan: true, history: [] };
-  // Valid: high-craft build stays on the model the router chose.
-  const ok = parseRouterPlan('{"subtasks":[{"title":"Build","capability":"frontend_design","model":"claude-fable","rationale":"top design"}]}', job, tools);
-  assert.equal(ok[0].model, "claude-fable");
+  // Valid: high-craft build stays on the model the router chose; analysis surfaced.
+  const ok = parseRouterPlan('{"analysis":"A game is a polished UI build.","subtasks":[{"title":"Build","capability":"frontend_design","model":"claude-fable","rationale":"top design"}]}', job, tools);
+  assert.equal(ok.tasks[0].model, "claude-fable");
+  assert.ok(ok.analysis.includes("polished"), "analysis is captured and shown");
   // Image generation MUST run on ChatGPT even if the router picked Claude.
   const media = parseRouterPlan('{"subtasks":[{"capability":"media_generation","model":"claude-opus"}]}', job, tools);
-  assert.equal(media[0].engine, "codex");
+  assert.equal(media.tasks[0].engine, "codex");
   // Coherence: two code subtasks collapse to a single build (+ any media).
   const coh = parseRouterPlan('{"subtasks":[{"capability":"new_code","model":"claude-sonnet"},{"capability":"frontend_design","model":"claude-opus"},{"capability":"media_generation","model":"gpt-5.6-terra"}]}', job, tools);
-  assert.equal(coh.filter((t) => t.capability !== "media_generation").length, 1, "one coherent build");
-  assert.ok(coh.some((t) => t.capability === "media_generation"), "media kept");
+  assert.equal(coh.tasks.filter((t) => t.capability !== "media_generation").length, 1, "one coherent build");
+  assert.ok(coh.tasks.some((t) => t.capability === "media_generation"), "media kept");
   // Unparseable ⇒ null ⇒ deterministic fallback runs instead.
   assert.equal(parseRouterPlan("sorry, I can't do that", job, tools), null);
   // The router prompt always lists the models with their usage weights.

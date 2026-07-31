@@ -864,7 +864,9 @@ async function handleRun(job, context) {
   }
   const sessions = await readJson(context.sessionsFile, {});
   // LLM router first (reads intent/emphasis/frustration); deterministic fallback.
-  const planned = (await planWithRouter(job, context)) || specialistPlan(job, context.tools);
+  const routed = await planWithRouter(job, context);
+  const planned = routed && routed.tasks && routed.tasks.length ? routed.tasks : specialistPlan(job, context.tools);
+  const routerAnalysis = (routed && routed.analysis) || "";
   const tasks = planned.length ? planned : [{
     label: "Agent",
     engine: engineFor(job, context.tools),
@@ -881,9 +883,11 @@ async function handleRun(job, context) {
       plan: {
         intent: String(job.prompt || "").replace(/\s+/g, " ").trim().slice(0, 200),
         complexity: maxTier,
-        strategy: planned.length > 1
+        // The LLM router's read of the request, shown prominently every time.
+        strategy: routerAnalysis || (planned.length > 1
           ? `${planned.length} parts, each on its strong-suit model; coupled work stays coherent, independent assets split off.`
-          : `A single coherent build on ${planned[0].modelLabel}, routed by capability at the lowest subscription usage.`,
+          : `A single coherent build on ${planned[0].modelLabel}, routed by capability at the lowest subscription usage.`),
+        analysis: routerAnalysis || undefined,
         executorModelId: planned[0].model,
         subtasks: planned.map((t) => ({ title: t.label, tier: t.tier, capability: t.capability, modelId: t.model, modelLabel: t.modelLabel, rationale: t.rationale })),
       },
