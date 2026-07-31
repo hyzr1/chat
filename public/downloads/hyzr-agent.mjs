@@ -826,7 +826,7 @@ async function deviceAuthorize(relay, capabilities, options = {}) {
   throw Object.assign(new Error("Pairing cancelled."), { code: "ABORTED" });
 }
 
-function runProcess(command, args, prompt, cwd, onLine) {
+function runProcess(command, args, prompt, cwd, onLine, timeoutMs) {
   return new Promise((resolve) => {
     const launch = commandLaunch(command, args);
     const child = spawn(launch.command, launch.args, {
@@ -838,6 +838,17 @@ function runProcess(command, args, prompt, cwd, onLine) {
     });
     let stdoutBuffer = "";
     let stderr = "";
+    let settled = false;
+    // Optional hard timeout — used for the lightweight router call so a stalled
+    // model process can NEVER hang the build. Kill the child and resolve as a
+    // failure; the caller then falls back to deterministic routing.
+    const timer = timeoutMs ? setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill("SIGKILL"); } catch {}
+      resolve({ code: 1, stderr: "router timed out", timedOut: true });
+    }, timeoutMs) : null;
+    const finish = (result) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); resolve(result); };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
@@ -847,12 +858,12 @@ function runProcess(command, args, prompt, cwd, onLine) {
       for (const line of lines) onLine(line);
     });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.once("error", (error) => resolve({ code: 1, stderr: error.message }));
+    child.once("error", (error) => finish({ code: 1, stderr: error.message }));
     child.once("close", (code) => {
       if (stdoutBuffer.trim()) onLine(stdoutBuffer);
-      resolve({ code: code ?? 1, stderr });
+      finish({ code: code ?? 1, stderr });
     });
-    child.stdin.end(prompt);
+    try { child.stdin.end(prompt); } catch {}
   });
 }
 
@@ -869,7 +880,7 @@ function claudeActivity(content) {
   return labels[content?.name] || (content?.name ? `Using ${content.name}` : "");
 }
 
-async function runClaude({ command, job, cwd, priorSession, permissionMode, emit }) {
+async function runClaude({ command, job, cwd, priorSession, permissionMode, emit, timeoutMs }) {
   const model = providerModel("claude", job.model);
   const args = [
     "-p",
@@ -924,7 +935,7 @@ async function runClaude({ command, job, cwd, priorSession, permissionMode, emit
       if (event.usage) emit("usage", "", event.usage);
       if (event.is_error) resultError = event.result || "Claude reported an error.";
     }
-  });
+  }, timeoutMs);
   if (processResult.code !== 0 || resultError) throw new Error(resultError || processResult.stderr.trim() || `Claude exited with code ${processResult.code}.`);
   return { sessionId, answer };
 }
@@ -934,7 +945,7 @@ function streamSeparator(previous) {
   return "\n\n";
 }
 
-async function runCodex({ command, job, cwd, priorSession, permissionMode, emit }) {
+async function runCodex({ command, job, cwd, priorSession, permissionMode, emit, timeoutMs }) {
   const model = providerModel("codex", job.model);
   const requestedEffort = String(job.effort || "").toLowerCase();
   const effort = requestedEffort === "ultra"
@@ -973,7 +984,7 @@ async function runCodex({ command, job, cwd, priorSession, permissionMode, emit 
     if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) answer = event.item.text;
     if (event.type === "turn.completed" && event.usage) emit("usage", "", event.usage);
     if (event.type === "turn.failed" || event.type === "error") failure = event.error?.message || event.message || "Codex reported an error.";
-  });
+  }, timeoutMs);
   if (answer) emit("text", answer);
   if (processResult.code !== 0 || failure) throw new Error(failure || processResult.stderr.trim() || `Codex exited with code ${processResult.code}.`);
   return { sessionId, answer };
@@ -1159,7 +1170,9 @@ async function planWithRouter(job, context) {
       command: context.tools[router.engine],
       job: { prompt, model: router.model, effort: "low", history: [] },
       cwd, priorSession: "", permissionMode: context.permissionMode, emit: () => {},
+      timeoutMs: 18000, // hard cap: a stalled router is killed and we fall back
     });
+    if (res?.timedOut) return null;
     return parseRouterPlan(res.answer, job, context.tools);
   } catch {
     return null;
