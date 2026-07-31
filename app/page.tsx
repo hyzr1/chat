@@ -1636,11 +1636,16 @@ export default function Home() {
         const started = Date.now();
         let lastPresenceCheck = started;
         let offlineSince = 0;
+        // Activity-based timeout: a big build can take a long time, but as long as
+        // the agent keeps streaming progress we keep waiting. We only give up if it
+        // goes SILENT for a while (genuinely stalled), with a generous hard cap.
+        let lastActivity = started;
         while (!ac.signal.aborted) {
           const ev = await fetchWithin(`/api/agent/events?job=${activeRunId}&cursor=${cursor}`, { cache: "no-store" }, 8_000)
             .then(async (response) => response.ok ? response.json() : null)
             .catch(() => null);
           if (ev) {
+            if ((ev.events || []).length) lastActivity = Date.now();
             cursor = ev.cursor ?? cursor;
             let done = false;
             for (const e of (ev.events || [])) {
@@ -1673,7 +1678,16 @@ export default function Home() {
               setAgentPaired(true);
             }
           }
-          if (Date.now() - started > 10 * 60 * 1000) { ans += "\n\n_(Timed out waiting for the agent.)_"; break; }
+          const silentFor = Date.now() - lastActivity;
+          const runningFor = Date.now() - started;
+          // Bail only if the agent has gone quiet for 6 min (stalled), or after a
+          // 45-min hard cap — not while it's actively building.
+          if (silentFor > 6 * 60 * 1000 || runningFor > 45 * 60 * 1000) {
+            ans += runningFor > 45 * 60 * 1000
+              ? "\n\n_(Reached the 45-minute run limit. The agent may still be finishing on your machine — check the workspace or preview.)_"
+              : "\n\n_(The agent went quiet for several minutes — it may have stalled. Reopen **hyzr.cmd** if needed, or press Regenerate.)_";
+            break;
+          }
           await new Promise((r) => setTimeout(r, 35));
         }
         applyRelay(ans || "The agent returned no output.", false);
