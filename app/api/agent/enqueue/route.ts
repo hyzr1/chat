@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   const workspaceId = cleanWorkspaceId(job.workspaceId || job.conversationId);
   if (!workspaceId) return NextResponse.json({ error: "A stable conversation workspace is required." }, { status: 400 });
   const payload: AgentRunJob = {
-    kind: "run",
+    kind: job.kind === "chat" ? "chat" : "run",
     id: String(job.id).slice(0, 120),
     runId: String(job.runId || job.id).slice(0, 120),
     conversationId: cleanWorkspaceId(job.conversationId || workspaceId),
@@ -45,6 +45,9 @@ export async function POST(request: NextRequest) {
     model: typeof job.model === "string" ? job.model.slice(0, 80) : null,
     effort: typeof job.effort === "string" ? job.effort.slice(0, 20) : undefined,
     plan: job.plan !== false,
+    enabledModelIds: Array.isArray(job.enabledModelIds)
+      ? job.enabledModelIds.filter((id: any) => typeof id === "string").slice(0, 24)
+      : undefined,
     enqueuedAt: Date.now(),
   };
   await enqueueAgentJob(token, payload);

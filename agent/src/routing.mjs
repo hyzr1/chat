@@ -251,6 +251,16 @@ const MODEL_BLURB = {
   "claude-haiku": "Cheapest Claude — fast, mechanical, high-volume work.",
 };
 
+// Hyzr Swift tier — the light, token-saving pool Chat runs on (best-first).
+export const HYZR_SWIFT = ["gpt-5.6-luna", "claude-haiku", "gpt-5.4-mini"];
+// The cheapest Swift model the connected providers can run (no routing).
+export function chatModelFor(tools) {
+  const usable = HYZR_SWIFT.filter((id) => MODELS[id] && (MODELS[id].engine === "claude" ? tools?.claude : tools?.codex));
+  if (!usable.length) return null;
+  const id = usable.reduce((a, b) => (usageWeight(b) < usageWeight(a) ? b : a));
+  return { engine: MODELS[id].engine, model: id, label: MODELS[id].label };
+}
+
 const ROUTER_MODEL = { codex: "gpt-5.4-mini", claude: "claude-haiku" };
 export function routerModelFor(tools) {
   if (tools?.codex) return { engine: "codex", model: ROUTER_MODEL.codex };

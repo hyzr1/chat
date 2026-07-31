@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
-import { planForAgent, routerModelFor, buildRouterPrompt, parseRouterPlan } from "./routing.mjs";
+import { planForAgent, routerModelFor, buildRouterPrompt, parseRouterPlan, chatModelFor } from "./routing.mjs";
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 3;
@@ -917,6 +917,45 @@ async function handleRpc(job, context) {
   }
 }
 
+// Hyzr Chat mode — plain conversation on the cheapest connected Swift model. NO
+// routing, NO tools, NO files, NO workspace changes. For questions and learning;
+// anything that touches the computer belongs in Agent mode.
+const CHAT_GUIDANCE =
+  "You are Hyzr Chat — a friendly, concise assistant for questions, explanations, and learning. " +
+  "Answer directly in Markdown. This is a PLAIN CONVERSATION: do NOT create, edit, read, or run files, " +
+  "do not start servers, and do not use any tools. If the user asks you to build, edit, run, or change " +
+  "anything on their computer, tell them to switch to Agent mode for that. Keep replies focused and helpful.";
+
+async function handleChat(job, context) {
+  const pick = chatModelFor(context.tools);
+  if (!pick) {
+    await context.emit(job.id, "error", "No chat model is available. Sign in to Claude Code or Codex, then reopen hyzr.cmd.");
+    return;
+  }
+  await context.emit(job.id, "route", "", {
+    modelId: pick.model, modelLabel: pick.label, provider: pick.engine,
+    tier: "trivial", capability: "conversation",
+    reason: "Hyzr Swift — the cheapest connected model, for plain chat.",
+  });
+  const runner = pick.engine === "codex" ? runCodex : runClaude;
+  const cwd = safeWorkspace(context.workspaceRoot, "hyzr-chat-scratch");
+  await mkdir(cwd, { recursive: true });
+  const chatJob = {
+    ...job,
+    model: pick.model,
+    effort: "low",
+    prompt: `${CHAT_GUIDANCE}\n\nUSER MESSAGE:\n${String(job.prompt || "")}`,
+  };
+  await runner({
+    command: context.tools[pick.engine],
+    job: chatJob,
+    cwd,
+    priorSession: "",
+    permissionMode: context.permissionMode,
+    emit: (type, text, data) => context.emit(job.id, type, text, data),
+  });
+}
+
 async function handleRun(job, context) {
   const workspace = safeWorkspace(context.workspaceRoot, job.workspaceId);
   await mkdir(workspace, { recursive: true });
@@ -1143,6 +1182,9 @@ export async function startAgent(options = {}) {
         if (job.kind === "rpc") {
           const data = await handleRpc(job, context);
           await emit(job.id, "result", "", data);
+        } else if (job.kind === "chat") {
+          await handleChat(job, context);
+          await emit(job.id, "done");
         } else {
           await handleRun({ ...job, kind: "run" }, context);
           await emit(job.id, "done");

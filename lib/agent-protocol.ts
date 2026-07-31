@@ -24,7 +24,9 @@ export interface AgentCapabilities {
 }
 
 export interface AgentRunJob {
-  kind: "run";
+  // "run" = a full Agent build (routing + tools). "chat" = a lightweight Hyzr
+  // Swift conversation (no routing, no tools, no files).
+  kind: "run" | "chat";
   id: string;
   runId: string;
   conversationId: string;
@@ -35,6 +37,7 @@ export interface AgentRunJob {
   model?: string | null;
   effort?: string;
   plan?: boolean;
+  enabledModelIds?: string[];
   enqueuedAt: number;
 }
 

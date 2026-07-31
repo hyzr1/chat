@@ -1411,14 +1411,20 @@ export default function Home() {
   async function send(preset?: string, baseMessages?: Msg[]) {
     let text = (preset ?? input).trim();
     if (!text || busyRef.current) return;
+    // Both Chat and Agent now run on your Claude/Codex subscription via hyzr.cmd,
+    // so both require an account — a guest's first send goes to sign-in.
+    if (!signedIn) { setShowLogin(true); return; }
     if (mode === "byok" && !hasKeys) {
       setShowSettings(true);
       return;
     }
+    // Chat (local mode) runs on hyzr.cmd too — a lightweight, no-tools Swift
+    // conversation. So both surfaces need the paired computer.
+    const usesAgent = workMode === "code" || (workMode === "chat" && mode === "local");
     // Agent mode with no connected computer: don't start a chat turn or reply
     // "you're not paired" — just open the Connect-your-computer popup. A fresh
     // presence check avoids acting on a stale offline state.
-    if (workMode === "code") {
+    if (usesAgent) {
       const hostedGuess = hosted || window.location.hostname.endsWith(".vercel.app") || window.location.hostname === "chat.hyzr.ai";
       if (hostedGuess && !agentPaired) {
         let hostedNow: boolean = hostedGuess;
@@ -1538,7 +1544,7 @@ export default function Home() {
     let hostedRun = hosted;
     let pairedNow = agentPaired;
     let agentNow = agentInfo;
-    if (workMode === "code") {
+    if (usesAgent) {
       hostedRun ||= window.location.hostname.endsWith(".vercel.app") || window.location.hostname === "chat.hyzr.ai";
       try {
         const setupResponse = await fetchWithin("/api/setup", { cache: "no-store" }, 6_000);
@@ -1558,7 +1564,7 @@ export default function Home() {
 
     // Hosted Agent runs on the user's paired machine, not this server. Route
     // the task through the relay and stream the agent's output back.
-    if (hostedRun && workMode === "code") {
+    if (hostedRun && usesAgent) {
       const applyRelay = (content: string, streaming: boolean) => setMessages((prev) => {
         const copy = [...prev];
         for (let i = copy.length - 1; i >= 0; i--) {
@@ -1614,7 +1620,9 @@ export default function Home() {
               history: requestHistory.slice(0, -1),
               model: override !== "auto" ? override : null,
               effort,
-              plan: planOn,
+              // Chat is a no-tools Swift conversation; Agent builds with routing.
+              kind: workMode === "code" ? "run" : "chat",
+              plan: workMode === "code" ? planOn : false,
               // The user's allowed-model pool: the Agent routes ONLY within these
               // (e.g. disable Sol/Fable to save usage, or Claude-only). Auto path.
               enabledModelIds: modelPool.local,

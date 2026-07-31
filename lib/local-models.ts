@@ -186,6 +186,29 @@ export const PLAN_USAGE_WEIGHT: Record<string, number> = {
 };
 export function planUsageWeight(id: string): number { return PLAN_USAGE_WEIGHT[id] ?? 1; }
 
+// ── Hyzr branded tiers ───────────────────────────────────────────────────────
+// User-facing quality tiers that are POOLS, not single models — brand identity
+// plus the freedom to swap the best underlying model per tier without users
+// caring which. Each tier lists its models best-first; routing (or a fixed pick
+// for Chat) chooses the cheapest CAPABLE one the user actually has connected.
+export type HyzrTier = "swift" | "core" | "max";
+export interface TierInfo { id: HyzrTier; label: string; blurb: string; models: string[] }
+export const HYZR_TIERS: Record<HyzrTier, TierInfo> = {
+  swift: { id: "swift", label: "Hyzr Swift", blurb: "Fast and token-light — chat, questions, quick edits.", models: ["gpt-5.6-luna", "claude-haiku", "gpt-5.4-mini"] },
+  core: { id: "core", label: "Hyzr Core", blurb: "Balanced everyday building.", models: ["gpt-5.6-terra", "claude-sonnet", "gpt-5.4"] },
+  max: { id: "max", label: "Hyzr Max", blurb: "Frontier, high-craft work.", models: ["claude-fable", "gpt-5.6-sol", "claude-opus", "gpt-5.5"] },
+};
+export const tierOf = (id: string): HyzrTier | undefined =>
+  (Object.keys(HYZR_TIERS) as HyzrTier[]).find((t) => HYZR_TIERS[t].models.includes(id));
+
+// Chat runs on Hyzr Swift, no routing: the cheapest Swift model the user has
+// connected (by subscription weight). enabled = ids the user has available.
+export function chatModelFor(enabled: string[]): string | undefined {
+  const pool = HYZR_TIERS.swift.models.filter((id) => enabled.includes(id));
+  if (!pool.length) return undefined;
+  return pool.reduce((a, b) => (planUsageWeight(b) < planUsageWeight(a) ? b : a));
+}
+
 // Output-weighted API price weight (coding output tokens dominate). Lower =
 // cheaper. Used only as a final tiebreak in routing. Unknown sorts last.
 export const LOCAL_MODEL_PRICING: Record<string, { in: number; out: number }> = {
