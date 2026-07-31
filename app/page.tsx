@@ -2280,29 +2280,14 @@ export default function Home() {
         </div>
         <div className="spacer" />
         {workMode === "code" && <div className="model-controls">
-          <button
-            className={`tool-btn deep-toggle ${planOn ? "active" : ""}`}
-            onClick={() => setPlanOn((p) => !p)}
-            title={planOn
-              ? "Deep Planning is ON — splits your request into subtasks and runs each on the model best suited to it (from your enabled pool), spreading load across both plans to spend less subscription usage."
-              : "Deep Planning — split into subtasks, best model per part from your pool, less usage."}
-            aria-pressed={planOn}
-          >
-            <IconSparkles size={14} /> <span className="deep-label">Deep</span>
-          </button>
           <div className="model-picker" style={{ position: "relative" }}>
             <button
               className={`tool-btn model-trigger ${override !== "auto" ? "active" : ""}`}
-              onClick={() => {
-                setShowModels((s) => !s);
-                setShowEffort(false);
-              }}
-              aria-label="Choose model"
+              onClick={() => setShowModels((s) => !s)}
+              aria-label="Choose model and effort"
             >
               {override === "auto" ? <IconRoute size={14} /> : <BrandMark brand={brandFor(findModel(mode, override)?.engine ?? override)} size={14} />}
-              <span className="picker-name-full">{override === "auto" ? "Auto" : findModel(mode, override)?.label ?? "Model"}</span>
-              <span className="picker-name-short">{override === "auto" ? "Auto" : shortModelLabel(findModel(mode, override)?.label ?? "Model")}</span>
-              <span className="picker-effort">{effortName(effort)}</span>
+              <span className="picker-name">{override === "auto" ? "Auto" : shortModelLabel(findModel(mode, override)?.label ?? "Model")}</span>
               <IconChevron size={13} className="chev" />
             </button>
             {showModels && (
@@ -2320,25 +2305,6 @@ export default function Home() {
                     setShowModels(false);
                   }}
                 />
-              </>
-            )}
-          </div>
-          <div className="effort-control" style={{ position: "relative" }}>
-            <button
-              className="tool-btn effort-trigger"
-              onClick={() => {
-                setShowEffort((s) => !s);
-                setShowModels(false);
-              }}
-              aria-label={`Reasoning effort: ${effort === "xhigh" ? "Extra" : effort[0].toUpperCase() + effort.slice(1)}`}
-            >
-              <span>{effort === "xhigh" ? "Extra" : effort[0].toUpperCase() + effort.slice(1)}</span>
-              <IconChevron size={13} className="chev" />
-            </button>
-            {showEffort && (
-              <>
-                <button className="model-menu-backdrop" aria-label="Close effort menu" onClick={() => setShowEffort(false)} />
-                <EffortMenu value={effort} onPick={setEffort} onClose={() => setShowEffort(false)} />
               </>
             )}
           </div>

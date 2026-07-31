@@ -1158,8 +1158,8 @@ select {
 .composer-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 10px;
 }
 .composer-row .spacer {
   flex: 1;
@@ -1171,14 +1171,17 @@ select {
   border: 1px solid var(--border);
   background: transparent;
   border-radius: 999px;
-  min-height: 32px;
-  padding: 5px 11px;
-  font-size: 12px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--text-soft);
   cursor: pointer;
   transition: border-color 0.13s, color 0.13s, background 0.13s;
 }
+/* Clean single-line model chip — no cramming, ellipsis if long. */
+.picker-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-btn svg {
   color: var(--text-faint);
 }
@@ -1203,13 +1206,14 @@ select {
 .send {
   width: 34px;
   height: 34px;
-  border-radius: 9px;
+  border-radius: 50%;
   border: none;
   background: var(--text);
   color: var(--bg);
   cursor: pointer;
   display: grid;
   place-items: center;
+  flex: 0 0 34px;
   transition: opacity 0.15s, transform 0.1s, background 0.15s;
 }
 .send:hover:not(:disabled) {
@@ -1234,8 +1238,8 @@ select {
 .send.remote-running .spinner { width: 14px; height: 14px; border-width: 1.5px; }
 .composer textarea:read-only { cursor: default; }
 .round-btn {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: transparent;
@@ -1243,6 +1247,7 @@ select {
   cursor: pointer;
   display: grid;
   place-items: center;
+  flex: 0 0 34px;
   transition: background 0.13s, color 0.13s, border-color 0.13s;
 }
 .round-btn:hover {
@@ -4380,7 +4385,7 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 32px;
+  height: 34px;
   padding: 0 13px;
   border: 1px solid transparent;
   border-radius: 999px;
@@ -5155,8 +5160,8 @@ select {
 }
 .model-picker,.effort-control { position:relative; z-index:42; }
 .model-trigger,.effort-trigger { position:relative; z-index:43; }
-.model-trigger,.effort-trigger { height:32px; min-height:32px; }
-.model-trigger { max-width:164px; }
+.model-trigger,.effort-trigger { height:34px; min-height:34px; }
+.model-trigger { max-width:170px; }
 .model-trigger > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .effort-trigger { min-width:68px; padding-inline:11px; }
 .simple-model-menu {
@@ -5357,7 +5362,7 @@ select {
 .simple-model-copy small { display: none; }
 .effort-default { margin-left: 7px; padding: 1px 6px; border-radius: 999px; background: var(--panel-hi); color: var(--text-faint); font: 600 9.5px/1.5 var(--font-sans); font-style: normal; }
 .effort-note { margin: 8px 8px 2px; color: var(--text-faint); font-size: 11px; line-height: 1.45; }
-.effort-drill, .effort-divider, .picker-effort { display: none; }
+.picker-effort { display: none; }
 
 /* Mobile composer + menus. Icon-only mode toggle, one combined model/effort
    control, docked bottom-sheet menus, and a few spacing/scaling fixes. */
