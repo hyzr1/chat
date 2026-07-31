@@ -2,7 +2,7 @@
 // (capability + tier + model) into a per-plan usage/savings preview WITHOUT any
 // model call. Mirrors vmx-engine's token-estimate + plan-usage weighting.
 
-import { LOCAL_MODELS, type TaskCapability } from "./local-models";
+import { LOCAL_MODELS, capabilityQuality, type TaskCapability } from "./local-models";
 
 type Tier = "trivial" | "standard" | "hard";
 
@@ -41,9 +41,23 @@ export interface PlanProjection {
   modelsUsed: number;
 }
 
+// The frontier ALTERNATIVE for a capability: the single highest-quality model
+// for it (the one you'd otherwise reach for), and its subscription weight. This
+// is the honest baseline — "what this would have cost on the top model" — so a
+// coherent build routed to a cheap model still shows its true savings, not 0%.
+function frontierWeight(capability: TaskCapability | undefined): number {
+  const cap = capability ?? "new_code";
+  let bestId = "", bestQ = -1;
+  for (const id of Object.keys(LOCAL_MODELS)) {
+    const q = capabilityQuality(id, cap);
+    if (q > bestQ) { bestQ = q; bestId = id; }
+  }
+  return planUsageWeight(bestId) || 1;
+}
+
 export function projectPlan(subtasks: { capability?: TaskCapability; tier: string; modelId?: string }[]): PlanProjection {
   const byPlan: PlanProjection["byPlan"] = {};
-  let tokens = 0, routedUsage = 0, maxWeight = 0;
+  let tokens = 0, routedUsage = 0, baseline = 0;
   const models = new Set<string>();
   const perEngine: Record<string, number> = { claude: 0, codex: 0 };
   for (const s of subtasks) {
@@ -53,7 +67,8 @@ export function projectPlan(subtasks: { capability?: TaskCapability; tier: strin
     const usage = tok * w;
     tokens += tok;
     routedUsage += usage;
-    maxWeight = Math.max(maxWeight, w);
+    // Baseline = this same work on the frontier model for its capability.
+    baseline += tok * Math.max(w, frontierWeight(s.capability));
     if (s.modelId) models.add(s.modelId);
     const plan = m?.plan ?? "Unknown";
     const provider = m?.engine ?? "";
@@ -62,7 +77,6 @@ export function projectPlan(subtasks: { capability?: TaskCapability; tier: strin
     if (provider) perEngine[provider] = (perEngine[provider] ?? 0) + usage;
   }
   const totalUsage = perEngine.claude + perEngine.codex || 1;
-  const baseline = tokens * (maxWeight || 1);
   return {
     tokens,
     byPlan,
