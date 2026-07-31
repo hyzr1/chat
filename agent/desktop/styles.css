@@ -42,13 +42,5 @@ legend { color:var(--muted); font-size:12px; font-weight:650; padding:0 5px; }
 .tool b.missing { color:var(--muted); }
 .folder-button { width:100%; }
 .minimize-note { color:var(--muted); text-align:center; font-size:12px; margin:0; }
-.code-promo { display:flex; align-items:center; gap:14px; margin:0 44px 26px; padding:15px 16px; border:1px solid var(--line); border-radius:14px; background:linear-gradient(135deg, color-mix(in srgb, var(--brand) 9%, var(--panel)), var(--panel) 62%); color:var(--text); text-decoration:none; transition:border-color .14s, transform .14s, box-shadow .14s; }
-.code-promo:hover { border-color:color-mix(in srgb, var(--brand) 48%, var(--line)); transform:translateY(-1px); box-shadow:0 12px 28px -18px color-mix(in srgb, var(--brand) 65%, transparent); }
-.code-promo-mark { width:40px; height:40px; flex:0 0 auto; display:grid; place-items:center; border-radius:11px; background:color-mix(in srgb, var(--brand) 14%, var(--panel)); color:var(--brand); font:750 15px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing:-.04em; }
-.code-promo-copy { display:grid; gap:3px; flex:1; min-width:0; }
-.code-promo-copy strong { font-size:13.5px; }
-.code-promo-copy small { color:var(--muted); font-size:12px; line-height:1.4; }
-.code-promo-go { flex:0 0 auto; display:inline-flex; align-items:center; gap:5px; color:var(--brand); font-size:12px; font-weight:700; }
-.code-promo-go i { font-style:normal; font-size:13px; }
 footer { margin-top:auto; display:flex; justify-content:space-between; color:var(--muted); font-size:11px; padding:15px 24px; border-top:1px solid var(--line); }
 

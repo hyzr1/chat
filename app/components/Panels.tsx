@@ -768,15 +768,6 @@ export function CustomizePanel() {
             <span>Multi-model</span>
           </div>
         </section>
-        <a className="family-promo" href="https://code.hyzr.ai" target="_blank" rel="noreferrer">
-          <span className="family-promo-mark"><IconCode size={18} /></span>
-          <div className="family-promo-copy">
-            <span className="family-promo-eyebrow">Also from Hyzr</span>
-            <strong>Hyzr Code</strong>
-            <p>Learn to write code without autocomplete — JavaScript &amp; Python from first principles, with narrated lessons and in-browser practice.</p>
-          </div>
-          <span className="family-promo-go">Open <IconArrowRight size={13} /></span>
-        </a>
       </div>
     </div>
   );

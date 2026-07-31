@@ -2030,38 +2030,6 @@ select {
 .logo-lab-head p { margin: 0; color: var(--text-faint); font-size: 12.5px; }
 .brand-principles { display: flex; flex-wrap: wrap; gap: 8px; }
 .brand-principles span { padding: 6px 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-faint); background: var(--field); font-size: 10px; font-weight: 600; }
-
-/* Cross-promo to the sibling Hyzr Code product */
-.family-promo {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  margin-top: 14px;
-  padding: 16px 18px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 70%, var(--panel)), var(--panel) 60%);
-  color: var(--text);
-  text-decoration: none;
-  transition: border-color 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
-}
-.family-promo:hover { border-color: var(--accent-border); transform: translateY(-1px); box-shadow: 0 14px 34px -20px color-mix(in srgb, var(--accent) 70%, transparent); }
-.family-promo-mark {
-  width: 42px; height: 42px; flex: 0 0 auto;
-  display: grid; place-items: center;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
-  color: var(--accent-ink);
-}
-.family-promo-copy { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.family-promo-eyebrow { color: var(--accent-ink); font: 600 9.5px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; }
-.family-promo-copy strong { font-size: 14.5px; font-weight: 620; }
-.family-promo-copy p { margin: 2px 0 0; color: var(--text-soft); font-size: 12px; line-height: 1.45; }
-.family-promo-go { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; color: var(--accent-ink); font-size: 12px; font-weight: 600; }
-@media (max-width: 640px) {
-  .family-promo { flex-wrap: wrap; }
-  .family-promo-go { width: 100%; }
-}
 .logo-current {
   min-width: 86px;
   display: flex;

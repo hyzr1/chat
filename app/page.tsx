@@ -2538,6 +2538,11 @@ export default function Home() {
               <IconChevron size={11} />
             </button>
           )}
+          <div className="top-links">
+            <a className="top-link" href="https://code.hyzr.ai" target="_blank" rel="noopener" title="Learn to code — Hyzr Code">
+              Code <IconExternal size={12} />
+            </a>
+          </div>
           <button
             className={`top-icon ${incognito ? "on" : ""}`}
             onClick={() => setIncognito((v) => !v)}

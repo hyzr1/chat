@@ -63,9 +63,5 @@ form.addEventListener("submit", async (event) => {
   });
 });
 
-document.querySelector("#code-promo").addEventListener("click", (event) => {
-  event.preventDefault();
-  api.openExternal(event.currentTarget.href);
-});
 document.querySelector("#open-folder").addEventListener("click", () => api.openWorkspaces(workspaceRoot));
 document.querySelector("#disconnect").addEventListener("click", async () => render(await api.disconnect()));
