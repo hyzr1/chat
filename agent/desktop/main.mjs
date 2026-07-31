@@ -144,6 +144,16 @@ ipcMain.handle("agent:pair", async (_event, values) => {
 });
 
 ipcMain.handle("agent:open-workspaces", (_event, workspaceRoot) => shell.openPath(String(workspaceRoot)));
+ipcMain.handle("agent:open-external", (_event, url) => {
+  // Only ever hand off vetted https Hyzr links to the OS browser.
+  try {
+    const parsed = new URL(String(url));
+    if (parsed.protocol === "https:" && (parsed.hostname === "hyzr.ai" || parsed.hostname.endsWith(".hyzr.ai"))) {
+      return shell.openExternal(parsed.toString());
+    }
+  } catch {}
+  return false;
+});
 ipcMain.handle("agent:disconnect", () => {
   controller?.abort();
   controller = undefined;

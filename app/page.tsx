@@ -77,8 +77,8 @@ type Mode = "local" | "byok";
 type WorkMode = "chat" | "code";
 type Effort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 type Theme = "dark" | "light" | "system";
-interface ProductPrefs { autoPreview: boolean; autoReview: boolean; adaptiveRouting: boolean; voiceInput: boolean; language: string; reducedMotion: boolean; compactChat: boolean; showUsage: boolean; sendWithEnter: boolean; newChatKey: "k" | "n"; saveHistory: boolean; }
-const DEFAULT_PRODUCT_PREFS: ProductPrefs = { autoPreview: true, autoReview: true, adaptiveRouting: true, voiceInput: true, language: "Auto detect", reducedMotion: false, compactChat: false, showUsage: true, sendWithEnter: true, newChatKey: "k", saveHistory: true };
+interface ProductPrefs { autoPreview: boolean; autoReview: boolean; adaptiveRouting: boolean; voiceInput: boolean; language: string; reducedMotion: boolean; compactChat: boolean; showUsage: boolean; sendWithEnter: boolean; newChatKey: "k" | "n"; saveHistory: boolean; accent: string; }
+const DEFAULT_PRODUCT_PREFS: ProductPrefs = { autoPreview: true, autoReview: true, adaptiveRouting: true, voiceInput: true, language: "Auto detect", reducedMotion: false, compactChat: false, showUsage: true, sendWithEnter: true, newChatKey: "k", saveHistory: true, accent: "blue" };
 const isMobileViewport = () => typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches;
 const requestsDevServer = (value: string) =>
   /\b(?:start|run|launch|open|put|serve|host)\b[\s\S]{0,55}\b(?:dev|development|local|preview|http|web)?\s*server\b/i.test(value)
@@ -445,24 +445,19 @@ const GUEST_FEATURES: { key: string; title: string; blurb: string; icon: React.R
   { key: "memory", title: "Memory", blurb: "Hyzr remembers your context and preferences across every chat.", icon: <IconSparkles size={16} /> },
 ];
 
-const SUGGESTIONS = [
-  {
-    label: "Build an interface",
-    prompt: "Build a polished, responsive project dashboard with a strong visual system and realistic content.",
-    icon: <IconLayers size={15} />,
-  },
-  {
-    label: "Debug a project",
-    prompt: "Inspect this project, identify the most important reliability and quality issues, then fix and verify them.",
-    icon: <IconTerminal size={15} />,
-  },
-  {
-    label: "Plan an architecture",
-    prompt:
-      "Design the architecture for a scalable multi-tenant realtime chat backend. Cover the data model, message fan-out, and how to avoid race conditions.",
-    icon: <IconSparkles size={15} />,
-  },
+// Selectable accent tints. `hex: null` keeps the theme's built-in default
+// (a slightly different blue per light/dark). Any other choice overrides
+// --accent inline on <html>; the ink/soft/border shades derive from it in CSS.
+const ACCENTS: { id: string; label: string; hex: string | null }[] = [
+  { id: "blue", label: "Blue", hex: null },
+  { id: "iris", label: "Iris", hex: "#6366f1" },
+  { id: "violet", label: "Violet", hex: "#8b5cf6" },
+  { id: "teal", label: "Teal", hex: "#14b8a6" },
+  { id: "green", label: "Green", hex: "#26a269" },
+  { id: "amber", label: "Amber", hex: "#e0913a" },
+  { id: "rose", label: "Rose", hex: "#f2506e" },
 ];
+const accentSwatch = (id: string) => ACCENTS.find((a) => a.id === id)?.hex ?? "#4d8dff";
 
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -605,6 +600,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [keys, setKeys] = useState<Keys>({ anthropic: "", openai: "", linear: "" });
   const [showSettings, setShowSettings] = useState(false);
+  const [showQuickSettings, setShowQuickSettings] = useState(false);
   const [showModels, setShowModels] = useState(false);
   const [showEffort, setShowEffort] = useState(false);
   const [override, setOverride] = useState("auto");
@@ -965,6 +961,13 @@ export default function Home() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const hex = ACCENTS.find((a) => a.id === productPrefs.accent)?.hex;
+    if (hex) root.style.setProperty("--accent", hex);
+    else root.style.removeProperty("--accent");
+  }, [productPrefs.accent]);
 
   useEffect(() => {
     document.documentElement.dataset.workmode = workMode;
@@ -2449,11 +2452,30 @@ export default function Home() {
 
         <div className="side-bottom">
           {signedIn ? (
-            <button className="side-account" onClick={() => { if (isMobileViewport()) setCollapsed(true); setShowSettings(true); }}>
-              <span className="side-avatar">{(account?.name?.[0] ?? "Y").toUpperCase()}</span>
-              <span className="side-account-name">{account?.name ?? "You"}</span>
-              <IconSliders size={15} />
-            </button>
+            <div className="side-account-wrap">
+              {showQuickSettings && (
+                <>
+                  <button className="qs-backdrop" aria-label="Close quick settings" onClick={() => setShowQuickSettings(false)} />
+                  <QuickSettings
+                    account={account}
+                    theme={theme}
+                    onTheme={setTheme}
+                    productPrefs={productPrefs}
+                    onProductPrefs={setProductPrefs}
+                    incognito={incognito}
+                    onIncognito={setIncognito}
+                    onOpenSettings={() => { setShowQuickSettings(false); if (isMobileViewport()) setCollapsed(true); setShowSettings(true); }}
+                    onSignOut={() => { setShowQuickSettings(false); void signOut(); }}
+                    onClose={() => setShowQuickSettings(false)}
+                  />
+                </>
+              )}
+              <button className={`side-account ${showQuickSettings ? "open" : ""}`} onClick={() => setShowQuickSettings((s) => !s)} aria-haspopup="menu" aria-expanded={showQuickSettings}>
+                <span className="side-avatar">{(account?.name?.[0] ?? "Y").toUpperCase()}</span>
+                <span className="side-account-name">{account?.name ?? "You"}</span>
+                <IconSliders size={15} />
+              </button>
+            </div>
           ) : (
             <div className="guest-signin">
               <p className="gs-copy"><b>Save your work</b>Sign in to keep history, use API keys, and pair your machine.</p>
@@ -2579,24 +2601,6 @@ export default function Home() {
             </div>
             {composer}
             {incognito && <p className="incognito-note">Sessions you create won’t be saved to your history.</p>}
-            {workMode === "code" && <div className="suggestions">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s.label}
-                  className="suggestion"
-                  onClick={() => {
-                    setInput(s.prompt);
-                    requestAnimationFrame(() => {
-                      taRef.current?.focus();
-                      autosize();
-                    });
-                  }}
-                >
-                  {s.icon}
-                  {s.label}
-                </button>
-              ))}
-            </div>}
             {workMode === "code" && (agentPaired ? (
               <button className="agent-ready-card" onClick={openPair}>
                 <span className="agent-ready-icon"><IconTerminal size={15} /></span>
@@ -2978,7 +2982,8 @@ function EffortMenu({ value, onPick, onClose }: { value: Effort; onPick: (effort
           aria-valuetext={effortName(value)}
           onChange={(event) => onPick(EFFORT_LEVELS[Number(event.target.value)])}
         />
-        <div aria-hidden="true">{EFFORT_LEVELS.map((level, levelIndex) => <i key={level} className={levelIndex === index ? "selected" : ""} />)}</div>
+        <div className="effort-track" aria-hidden="true" />
+        <div className="effort-ticks" aria-hidden="true">{EFFORT_LEVELS.map((level, levelIndex) => <i key={level} className={levelIndex <= index ? "on" : ""} />)}</div>
       </div>
     </div>
   );
@@ -3576,6 +3581,50 @@ function SettingRow({ title, description, children }: { title: string; descripti
 function SettingSection({ title, description, children }: { title?: string; description?: string; children: React.ReactNode }) {
   return <section className="setting-section">{title && <div className="setting-section-title"><h3>{title}</h3>{description && <p>{description}</p>}</div>}<div className="setting-group">{children}</div></section>;
 }
+function AccentPicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  return <div className="accent-options" role="radiogroup" aria-label="Accent color">
+    {ACCENTS.map((accent) => <button key={accent.id} type="button" role="radio" aria-checked={value === accent.id} aria-label={accent.label} title={accent.label} className={value === accent.id ? "on" : ""} onClick={() => onChange(accent.id)}><span style={{ background: accentSwatch(accent.id) }} /></button>)}
+  </div>;
+}
+
+// Perplexity-style quick settings: the most-touched controls inline, with the
+// full settings panel one click away. Opens from the sidebar account button.
+function QuickSettings({ account, theme, onTheme, productPrefs, onProductPrefs, incognito, onIncognito, onOpenSettings, onSignOut, onClose }: {
+  account: { name: string; email: string } | null; theme: Theme; onTheme: (theme: Theme) => void;
+  productPrefs: ProductPrefs; onProductPrefs: (prefs: ProductPrefs) => void;
+  incognito: boolean; onIncognito: (value: boolean) => void;
+  onOpenSettings: () => void; onSignOut: () => void; onClose: () => void;
+}) {
+  const updatePref = <K extends keyof ProductPrefs>(key: K, value: ProductPrefs[K]) => onProductPrefs({ ...productPrefs, [key]: value });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return <div className="quick-settings" role="menu">
+    <div className="qs-account">
+      <span className="qs-avatar">{(account?.name?.[0] ?? "Y").toUpperCase()}</span>
+      <div><strong>{account?.name ?? "You"}</strong>{account?.email && <small>{account.email}</small>}</div>
+    </div>
+    <div className="qs-block">
+      <span className="qs-label">Theme</span>
+      <div className="qs-seg">{(["light", "dark", "system"] as Theme[]).map((choice) => <button key={choice} className={theme === choice ? "on" : ""} onClick={() => onTheme(choice)}>{choice === "system" ? "Auto" : choice[0].toUpperCase() + choice.slice(1)}</button>)}</div>
+    </div>
+    <div className="qs-block">
+      <span className="qs-label">Accent</span>
+      <AccentPicker value={productPrefs.accent} onChange={(id) => updatePref("accent", id)} />
+    </div>
+    <div className="qs-block qs-switches">
+      <div className="qs-switch"><span>Compact chat</span><Toggle value={productPrefs.compactChat} onChange={(value) => updatePref("compactChat", value)} /></div>
+      <div className="qs-switch"><span>Incognito</span><Toggle value={incognito} onChange={onIncognito} /></div>
+    </div>
+    <div className="qs-actions">
+      <button className="qs-action" onClick={onOpenSettings}><IconSliders size={15} /><span>All settings</span><IconChevron size={13} className="qs-chev" /></button>
+      <button className="qs-action" onClick={onSignOut}><IconLock size={15} /><span>Sign out</span></button>
+    </div>
+    <div className="qs-plan"><HyzrMark size={22} /><div><strong>Hyzr Local</strong><small>Developer access</small></div></div>
+  </div>;
+}
 
 interface RoutingLearningSummary {
   ratedDecisions: number;
@@ -3651,6 +3700,7 @@ function SettingsModal({
 
   const appearance = <>
     <SettingSection title="Theme" description="Choose a theme or follow your operating system."><div className="theme-options settings-theme-options">{(["light", "dark", "system"] as Theme[]).map((choice) => <button key={choice} className={theme === choice ? "on" : ""} onClick={() => onTheme(choice)}><span className={`theme-preview ${choice}`}><i /><i /><i /></span><strong>{choice[0].toUpperCase() + choice.slice(1)}</strong>{theme === choice && <IconCheck size={14} />}</button>)}</div></SettingSection>
+    <SettingSection title="Accent" description="Tint buttons, links, and highlights across Hyzr Chat."><SettingRow title="Accent color" description="Applies instantly on this device."><AccentPicker value={productPrefs.accent} onChange={(value) => updatePref("accent", value)} /></SettingRow></SettingSection>
     <SettingSection title="Interface"><SettingRow title="Compact conversations" description="Reduce spacing between messages and routing details."><Toggle value={productPrefs.compactChat} onChange={(value) => updatePref("compactChat", value)} /></SettingRow><SettingRow title="Show live usage" description="Display elapsed time, tasks, compute, and token telemetry during runs."><Toggle value={productPrefs.showUsage} onChange={(value) => updatePref("showUsage", value)} /></SettingRow><SettingRow title="Reduce motion" description="Minimize transitions and animated status effects."><Toggle value={productPrefs.reducedMotion} onChange={(value) => updatePref("reducedMotion", value)} /></SettingRow><SettingRow title="Product identity" description="See the shared identity used across the Hyzr product family."><button className="setting-button" onClick={onOpenSymbols}>View identity <IconArrowRight size={13} /></button></SettingRow></SettingSection>
   </>;
 
