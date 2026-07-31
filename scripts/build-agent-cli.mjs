@@ -13,10 +13,10 @@ const coreRaw = await readFile(source, "utf8");
 // its top-level names can't collide with core.mjs, and rewrite core's import to
 // destructure from that namespace. routing.mjs is self-contained (no imports).
 const routing = await readFile(path.join(root, "agent", "src", "routing.mjs"), "utf8");
-const routingInlined = `const __hyzrRouting = (() => {\n${routing.replace(/^export\s+/gm, "")}\nreturn { planForAgent };\n})();\n`;
+const routingInlined = `const __hyzrRouting = (() => {\n${routing.replace(/^export\s+/gm, "")}\nreturn { planForAgent, routerModelFor, buildRouterPrompt, parseRouterPlan, availableModelIds };\n})();\n`;
 const core = coreRaw.replace(
-  /import\s*\{\s*planForAgent\s*\}\s*from\s*["']\.\/routing\.mjs["'];?/,
-  "const { planForAgent } = __hyzrRouting;",
+  /import\s*\{[^}]*\}\s*from\s*["']\.\/routing\.mjs["'];?/,
+  "const { planForAgent, routerModelFor, buildRouterPrompt, parseRouterPlan } = __hyzrRouting;",
 );
 const launcher = `
 

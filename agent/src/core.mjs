@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
-import { planForAgent } from "./routing.mjs";
+import { planForAgent, routerModelFor, buildRouterPrompt, parseRouterPlan } from "./routing.mjs";
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 3;
@@ -724,6 +724,31 @@ function specialistPlan(job, tools) {
   return planForAgent(job, tools).slice(0, 4);
 }
 
+// PRIMARY planner: a cheap model reads the request (difficulty, emphasis,
+// frustration, explicit cues) and picks the best model per part. Silent, low
+// effort. Returns validated agent tasks, or null ⇒ deterministic specialistPlan
+// fallback. Never blocks execution: any failure just falls back.
+async function planWithRouter(job, context) {
+  if (!job.plan) return null;
+  const router = routerModelFor(context.tools);
+  if (!router) return null;
+  const prompt = buildRouterPrompt(job, context.tools);
+  if (!prompt) return null;
+  const runner = router.engine === "codex" ? runCodex : runClaude;
+  const cwd = safeWorkspace(context.workspaceRoot, job.workspaceId);
+  try {
+    await mkdir(cwd, { recursive: true });
+    const res = await runner({
+      command: context.tools[router.engine],
+      job: { prompt, model: router.model, effort: "low", history: [] },
+      cwd, priorSession: "", permissionMode: context.permissionMode, emit: () => {},
+    });
+    return parseRouterPlan(res.answer, job, context.tools);
+  } catch {
+    return null;
+  }
+}
+
 async function handleRpc(job, context) {
   const params = job.params || {};
   switch (job.method) {
@@ -825,7 +850,8 @@ async function handleRun(job, context) {
     workspacePreferredPorts.set(id, requestedPort);
   }
   const sessions = await readJson(context.sessionsFile, {});
-  const planned = specialistPlan(job, context.tools);
+  // LLM router first (reads intent/emphasis/frustration); deterministic fallback.
+  const planned = (await planWithRouter(job, context)) || specialistPlan(job, context.tools);
   const tasks = planned.length ? planned : [{
     label: "Agent",
     engine: engineFor(job, context.tools),

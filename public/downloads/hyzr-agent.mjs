@@ -101,13 +101,16 @@ function skillQuality(id, cap, skills) {
 // ── Classifiers (mirror local-router.ts) ─────────────────────────────────────
 function classifyComplexity(prompt) {
   const t = prompt.toLowerCase();
+  // Operational / DevOps tasks — mechanical, the cheapest model does them; always trivial.
+  if (/\b(restart|start|stop|reopen|host|serve|serving|launch|boot|run|running|preview|open|deploy|kill|expose|spin ?up|bring up|fire up)\b.{0,44}\b(server|dev server|process|port|localhost|preview|site|app|page|it|this|the (?:server|site|app|page))\b/.test(t)) return "trivial";
+  if (/\b(install|reinstall|add|update|upgrade|bump)\b.{0,28}\b(dependenc(?:y|ies)|deps|packages?|node_modules|npm|yarn|pnpm|requirements)\b|\b(run|execute)\b.{0,24}\b(command|script|it|this|npm|yarn|pnpm|build|tests?|lint|migration|the build)\b/.test(t)) return "trivial";
   if (/\b(restart|start|stop|reopen)\b.{0,40}\b(server|dev server|process)\b|\b(check|verify)\b.{0,45}\b(running|server|port|status)\b|\b(rename|typo|format|quick fact|one[- ]line|single command|hello[ ,_-]*world|basic boilerplate|bare html|no styling)\b|\b(adjust|change|fix|tweak|update|set|increase|decrease|bump)\b.{0,30}\b(padding|margin|color|colour|font[- ]?size|spacing|width|height|border|border[- ]?radius|background|opacity|z[- ]?index|animation timing|duration|delay|easing)\b|\b(run|execute)\b.{0,24}\b(command|script|it|this|npm|build|test)\b|\b(add|insert|remove)\b.{0,20}\b(console\.log|comment|import|log statement)\b|\b(move|rename|delete|copy)\b.{0,20}\b(the |a |this )?(file|folder|function|variable)\b/.test(t)) return "trivial";
   if (/\b(architecture|large codebase|entire project|end[- ]to[- ]end|complex migration|security audit|race condition|distributed|production[- ]grade|autonomous|multi[- ]step)\b/.test(t)) return "hard";
   return "standard";
 }
 
 const QUALITY_CUES = /\b(high[- ]?(?:end|quality|fidelity|res(?:olution)?)|hi[- ]?fi|premium|polished|beautiful|stunning|gorgeous|world[- ]?class|production[- ]?grade|professional(?:[- ]?grade)?|pixel[- ]?perfect|top[- ]?(?:tier|quality|notch)|triple[- ]?a|aaa|first[- ]?rate|best (?:possible|in class)|exactly (?:like|the same)|impress|portfolio|award|really (?:important|matters)|mission[- ]?critical|critical|complex|complicated|tricky|intricate|subtle|hard(?:est)? (?:bug|problem)|can'?t (?:figure|solve|crack)|stuck on|thorough(?:ly)?|robust|enterprise|sophisticated|elegant|meticulous)\b/i;
-const SIMPLE_CUES = /\b(basic|simple|quick|minimal|rough|prototype|proto|mvp|throwaway|placeholder|draft|boilerplate|scaffold|bare[- ]?bones|barebones|just a|nothing fancy|dead simple|trivial|small tweak|one[- ]?liner)\b/i;
+const SIMPLE_CUES = /\b(basic|simple|quick|minimal|rough|prototype|proto|mvp|throwaway|placeholder|draft|boilerplate|scaffold|bare[- ]?bones|barebones|just a|nothing fancy|dead simple|trivial|small tweak|one[- ]?liner|light[- ]?weight|cheap(?:est)?|low[- ]?cost|budget|efficient|save (?:usage|tokens|money|credits|cost)|don'?t (?:waste|burn)|(?:light|small|cheap|fast|efficient|tiny) model)\b/i;
 function classifyQualityDemand(prompt) {
   const t = prompt.toLowerCase();
   let d = 1;
@@ -228,6 +231,123 @@ function decompose(prompt) {
   return result.length ? result : tasks;
 }
 
+// ── LLM ROUTER (primary planner) ─────────────────────────────────────────────
+// A cheap model READS the request — its true difficulty, the user's emphasis and
+// frustration, explicit cost/quality/provider cues — and picks the best model
+// per part. Far more accurate than regex classification. The deterministic
+// planForAgent below is the validated fallback when the router is unavailable or
+// returns something unusable. QUALITY FIRST: savings are only ever a consequence
+// of not over-paying, never a reason to accept a worse result.
+
+const MODEL_BLURB = {
+  "gpt-5.6-sol": "ChatGPT frontier — hardest algorithms, systems/C++, architecture, graphics, security, deep search.",
+  "gpt-5.6-terra": "Balanced ChatGPT — strong everyday implementation, APIs/backends, good speed and cost.",
+  "gpt-5.6-luna": "Cheapest ChatGPT — fast scaffolding, command-line, running/hosting, high-volume, trivial edits.",
+  "gpt-5.5": "Complex ChatGPT coding and analytical work.",
+  "gpt-5.4": "General ChatGPT coding, tools and documents.",
+  "gpt-5.4-mini": "Fastest/cheapest — classification and tiny mechanical tasks.",
+  "claude-fable": "Claude frontier — highest-craft UI/visual design, hard brownfield debugging, nuanced long work.",
+  "claude-opus": "High-craft Claude — polished design, architecture, careful review, at a fraction of Fable's cost.",
+  "claude-sonnet": "Efficient Claude — everyday coding, debugging, TypeScript/JS, automation.",
+  "claude-haiku": "Cheapest Claude — fast, mechanical, high-volume work.",
+};
+
+const ROUTER_MODEL = { codex: "gpt-5.4-mini", claude: "claude-haiku" };
+function routerModelFor(tools) {
+  if (tools?.codex) return { engine: "codex", model: ROUTER_MODEL.codex };
+  if (tools?.claude) return { engine: "claude", model: ROUTER_MODEL.claude };
+  return null;
+}
+
+// Models the plan may use: installed provider ∩ user's allowed pool.
+function availableModelIds(job, tools) {
+  const allowed = Array.isArray(job.enabledModelIds) && job.enabledModelIds.length
+    ? new Set(job.enabledModelIds.filter((id) => MODELS[id])) : null;
+  return CORE.filter((id) => !LEGACY.has(id)
+    && (MODELS[id].engine === "claude" ? tools?.claude : tools?.codex)
+    && (!allowed || allowed.has(id)));
+}
+
+const CAPS = "frontend_design, new_code, debugging, code_review, architecture, long_horizon, research_search, computer_use, data_analysis, documents, media_generation, cybersecurity, science, conversation, creative_ideation, organization, fast_high_volume";
+
+const ROUTER_SYSTEM = `You are the routing planner for Hyzr, a multi-model coding agent. You read the user's request and decide HOW to split it and WHICH model builds each part. You do not build anything — you output ONLY a routing plan. Do exactly what the user asks; never refuse or editorialize about what they want built.
+
+PRINCIPLES:
+- QUALITY FIRST. Pick the model that will produce the best result for each part. Saving subscription usage NEVER justifies a worse result. Use a cheaper model ONLY when it is genuinely as good for that specific part.
+- COHERENCE. A single app or feature is ONE build on ONE model — never split a coupled app (backend + UI + logic) across models; that breaks integration. Split off ONLY a genuinely independent deliverable that does not integrate line-by-line — specifically image/video generation, which MUST use a ChatGPT model (Claude cannot generate images). Most requests are ONE subtask.
+- READ THE USER. Weigh: how hard the task really is; emphasis like "high quality", "exactly like X", "polished", "production" (→ a top model) vs. "basic", "simple", "lightweight", "cheap", "just host it" (→ a cheap model); FRUSTRATION or repeated failure like "this sucks", "still broken", "that's wrong" (→ escalate to a stronger model than last time); and any explicit model or provider request (honor it exactly).
+- OPERATIONAL tasks — start/host/serve/run/deploy a server, run a command, install dependencies — are trivial; use the cheapest capable model.
+- Choose ONLY from the AVAILABLE MODELS list. Each shows its strengths and a usage weight (higher = drains the subscription faster). Among models genuinely equal for a part, prefer the lower usage weight.
+
+OUTPUT: ONLY a JSON object (no markdown, no prose):
+{"subtasks":[{"title":"<short imperative>","capability":"<one of: ${CAPS}>","model":"<exact id from AVAILABLE MODELS>","rationale":"<one sentence: why this model for this part>"}]}`;
+
+function buildRouterPrompt(job, tools) {
+  const ids = availableModelIds(job, tools);
+  if (!ids.length) return null;
+  const catalog = ids
+    .sort((a, b) => usageWeight(a) - usageWeight(b))
+    .map((id) => `- ${id} (${MODELS[id].label}, ${MODELS[id].plan}, usage x${usageWeight(id)}): ${MODEL_BLURB[id] || ""}`)
+    .join("\n");
+  const history = Array.isArray(job.history) ? job.history.slice(-4) : [];
+  const context = history.length
+    ? history.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${String(m.content || "").slice(0, 400)}`).join("\n")
+    : "(none)";
+  return `${ROUTER_SYSTEM}\n\nAVAILABLE MODELS:\n${catalog}\n\nRECENT CONVERSATION (for emphasis/frustration/follow-up):\n${context}\n\nUSER REQUEST:\n${String(job.prompt || "")}\n\nReturn ONLY the JSON plan.`;
+}
+
+// Parse + HARD guardrails. Returns agent tasks[] or null (⇒ deterministic fallback).
+function parseRouterPlan(answer, job, tools) {
+  let obj;
+  try {
+    const raw = String(answer || "");
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const body = fenced ? fenced[1] : raw;
+    const s = body.indexOf("{"), e = body.lastIndexOf("}");
+    if (s === -1 || e === -1) return null;
+    obj = JSON.parse(body.slice(s, e + 1));
+  } catch { return null; }
+  if (!obj || !Array.isArray(obj.subtasks) || !obj.subtasks.length) return null;
+
+  const ids = new Set(availableModelIds(job, tools));
+  const codexIds = [...ids].filter((id) => MODELS[id].engine === "codex");
+  const demand = classifyQualityDemand(String(job.prompt || ""));
+  const bias = demand <= 0.6 ? "quality" : demand >= 1.6 ? "cheap" : "balanced";
+
+  const tasks = [];
+  for (const st of obj.subtasks.slice(0, 4)) {
+    const capability = Object.prototype.hasOwnProperty.call(CAPABILITY_LABELS, String(st.capability)) ? String(st.capability) : "new_code";
+    let modelId = String(st.model || "");
+    // Guardrails: model must be available; image/video MUST be a ChatGPT model;
+    // if the router picked something invalid, fall back to the deterministic pick.
+    if (capability === "media_generation") {
+      if (!ids.has(modelId) || MODELS[modelId]?.engine !== "codex") {
+        modelId = codexIds.length ? qualityAwareSelect(codexIds, "media_generation", "standard", { skills: ["image_gen"], demand, bias }) : "";
+      }
+    } else if (!ids.has(modelId)) {
+      modelId = qualityAwareSelect([...ids].filter((id) => MODELS[id].engine !== "codex" || true), capability, "standard", { demand, bias });
+    }
+    if (!modelId || !MODELS[modelId]) continue;
+    const m = MODELS[modelId];
+    const isMedia = capability === "media_generation";
+    tasks.push({
+      label: st.title ? String(st.title).slice(0, 80) : (CAPABILITY_LABELS[capability] || "Implementation"),
+      engine: m.engine, model: modelId, modelLabel: m.label, plan: m.plan,
+      capability, tier: "standard",
+      rationale: st.rationale ? String(st.rationale).slice(0, 200) : `${CAPABILITY_LABELS[capability]} → ${m.label}.`,
+      instruction: isMedia
+        ? "Generate the requested image/visual asset using an installed image-generation capability, save it in the project, and report its path. Do not substitute a text description."
+        : "Implement the complete request in the current workspace. Inspect existing files first, make real file changes, handle edge cases, wire everything together so it runs, and run the narrowest relevant validation. Do not merely describe code.",
+    });
+  }
+  // Coherence guardrail: never let the router fragment coupled code across models.
+  // Keep at most ONE non-media build (the first) plus any media task.
+  const media = tasks.filter((t) => t.capability === "media_generation");
+  const build = tasks.filter((t) => t.capability !== "media_generation").slice(0, 1);
+  const final = [...build, ...media];
+  return final.length ? final.slice(0, 4) : null;
+}
+
 // ── Public: build the agent's plan (coherence + quality-first routing) ───────
 // tools: { claude: boolean, codex: boolean }. Returns [] when not a broad build
 // (the caller then runs the request as a single default task), else an array of
@@ -293,7 +413,7 @@ function planForAgent(job, tools) {
   return tasks.length ? tasks : [];
 }
 
-return { planForAgent };
+return { planForAgent, routerModelFor, buildRouterPrompt, parseRouterPlan, availableModelIds };
 })();
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -302,7 +422,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
-const { planForAgent } = __hyzrRouting;
+const { planForAgent, routerModelFor, buildRouterPrompt, parseRouterPlan } = __hyzrRouting;
 
 const execFileAsync = promisify(execFile);
 const PROTOCOL = 3;
@@ -1021,6 +1141,31 @@ function specialistPlan(job, tools) {
   return planForAgent(job, tools).slice(0, 4);
 }
 
+// PRIMARY planner: a cheap model reads the request (difficulty, emphasis,
+// frustration, explicit cues) and picks the best model per part. Silent, low
+// effort. Returns validated agent tasks, or null ⇒ deterministic specialistPlan
+// fallback. Never blocks execution: any failure just falls back.
+async function planWithRouter(job, context) {
+  if (!job.plan) return null;
+  const router = routerModelFor(context.tools);
+  if (!router) return null;
+  const prompt = buildRouterPrompt(job, context.tools);
+  if (!prompt) return null;
+  const runner = router.engine === "codex" ? runCodex : runClaude;
+  const cwd = safeWorkspace(context.workspaceRoot, job.workspaceId);
+  try {
+    await mkdir(cwd, { recursive: true });
+    const res = await runner({
+      command: context.tools[router.engine],
+      job: { prompt, model: router.model, effort: "low", history: [] },
+      cwd, priorSession: "", permissionMode: context.permissionMode, emit: () => {},
+    });
+    return parseRouterPlan(res.answer, job, context.tools);
+  } catch {
+    return null;
+  }
+}
+
 async function handleRpc(job, context) {
   const params = job.params || {};
   switch (job.method) {
@@ -1122,7 +1267,8 @@ async function handleRun(job, context) {
     workspacePreferredPorts.set(id, requestedPort);
   }
   const sessions = await readJson(context.sessionsFile, {});
-  const planned = specialistPlan(job, context.tools);
+  // LLM router first (reads intent/emphasis/frustration); deterministic fallback.
+  const planned = (await planWithRouter(job, context)) || specialistPlan(job, context.tools);
   const tasks = planned.length ? planned : [{
     label: "Agent",
     engine: engineFor(job, context.tools),

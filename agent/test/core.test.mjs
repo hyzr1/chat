@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { __test } from "../src/core.mjs";
+import { parseRouterPlan, buildRouterPrompt } from "../src/routing.mjs";
 
 test("one conversation always resolves to one workspace", () => {
   const root = path.join(os.tmpdir(), "hyzr-test-workspaces");
@@ -162,6 +163,25 @@ test("coherence-first: a coupled app is one build; only the image splits off", (
   assert.equal(build.engine, "claude", "polished app build routes to Claude");
   assert.ok(media, "the image is its own subtask");
   assert.equal(media.engine, "codex", "image generation routes to ChatGPT (Claude can't)");
+});
+
+test("LLM router: valid plan honored; image forced to ChatGPT; over-split collapsed; garbage falls back", () => {
+  const tools = { claude: "claude", codex: "codex" };
+  const job = { prompt: "build a high quality game and generate a hero image", plan: true, history: [] };
+  // Valid: high-craft build stays on the model the router chose.
+  const ok = parseRouterPlan('{"subtasks":[{"title":"Build","capability":"frontend_design","model":"claude-fable","rationale":"top design"}]}', job, tools);
+  assert.equal(ok[0].model, "claude-fable");
+  // Image generation MUST run on ChatGPT even if the router picked Claude.
+  const media = parseRouterPlan('{"subtasks":[{"capability":"media_generation","model":"claude-opus"}]}', job, tools);
+  assert.equal(media[0].engine, "codex");
+  // Coherence: two code subtasks collapse to a single build (+ any media).
+  const coh = parseRouterPlan('{"subtasks":[{"capability":"new_code","model":"claude-sonnet"},{"capability":"frontend_design","model":"claude-opus"},{"capability":"media_generation","model":"gpt-5.6-terra"}]}', job, tools);
+  assert.equal(coh.filter((t) => t.capability !== "media_generation").length, 1, "one coherent build");
+  assert.ok(coh.some((t) => t.capability === "media_generation"), "media kept");
+  // Unparseable ⇒ null ⇒ deterministic fallback runs instead.
+  assert.equal(parseRouterPlan("sorry, I can't do that", job, tools), null);
+  // The router prompt always lists the models with their usage weights.
+  assert.ok(/usage x/.test(buildRouterPrompt(job, tools)));
 });
 
 test("a trivial one-off still shows its routed model (one cheap node, no orchestration)", () => {
