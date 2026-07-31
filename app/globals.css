@@ -2133,6 +2133,9 @@ select {
     z-index: 80;
     width: min(86vw, 300px);
     box-shadow: 18px 0 50px rgba(0, 0, 0, 0.5);
+    transform: translateX(0);
+    transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+    will-change: transform;
   }
   .sidebar-backdrop {
     position: fixed;
@@ -2143,9 +2146,16 @@ select {
     border: 0;
     background: rgba(0, 0, 0, .38);
     touch-action: manipulation;
+    animation: fade 0.24s ease both;
   }
+  /* Slide the drawer off-screen instead of hiding it, so it animates in/out.
+     display:flex overrides the base .sidebar.collapsed { display:none }, which
+     would otherwise kill the transition. */
   .sidebar.collapsed {
-    display: none;
+    display: flex;
+    transform: translateX(-100%);
+    box-shadow: none;
+    pointer-events: none;
   }
   .topbar {
     height: 48px;
@@ -5374,8 +5384,8 @@ select {
   .model-controls .model-picker { flex: 0 1 auto; max-width: 150px; }
   .model-controls .model-picker .tool-btn { max-width: 150px; }
   .model-trigger .brand-mark, .model-trigger .brand-mark svg { flex: 0 0 auto; }
+  .composer-row > .round-btn { flex: 0 0 34px; }  /* voice/mic stays on mobile */
   .send { flex: 0 0 34px; }
-  :root[data-workmode="code"] .composer-row > .round-btn { display: none; }  /* mic */
 
   .effort-drill { display: flex; }
   .effort-divider { display: block; }
@@ -5396,8 +5406,12 @@ select {
   /* Attach (+) menu anchors above its button instead of floating at the bottom. */
   .plus-menu { position: absolute; left: 0; right: auto; bottom: calc(100% + 8px); width: min(240px, calc(100vw - 24px)); }
 
-  /* Connect / offline notice: pin near the bottom of the screen like a toast. */
-  .pair-cta { position: fixed; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); z-index: 60; width: auto; margin: 0; }
+  /* Connect / offline notice: pin near the bottom of the screen like a toast,
+     with a bit more height so it doesn't feel crowded. */
+  .pair-cta { position: fixed; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); z-index: 60; width: auto; margin: 0; padding: 15px 16px; row-gap: 13px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); }
+  .pair-cta-text { gap: 3px; }
+  .pair-cta-actions { margin-top: 2px; gap: 9px; }
+  .pair-cta-download, .pair-cta-btn { min-height: 40px; }
 
   /* Sidebar search text was inflated to 16px by the global input rule. */
   .hist-search input { font-size: 13.5px !important; }

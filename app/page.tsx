@@ -2618,7 +2618,7 @@ export default function Home() {
             </div>
             {composer}
             {incognito && <p className="incognito-note">Sessions you create won’t be saved to your history.</p>}
-            {workMode === "code" && !agentPaired && (
+            {workMode === "code" && !agentPaired && !showModels && !showPlus && (
               <div className={`pair-cta ${agentInfo ? "known-offline" : ""}`}>
                 <IconTerminal size={20} />
                 <span className="pair-cta-text">
