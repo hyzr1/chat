@@ -164,12 +164,22 @@ test("coherence-first: a coupled app is one build; only the image splits off", (
   assert.equal(media.engine, "codex", "image generation routes to ChatGPT (Claude can't)");
 });
 
-test("a trivial one-off avoids orchestration entirely", () => {
-  assert.deepEqual(__test.specialistPlan({ plan: true, prompt: "change the button padding to 8px" }, { claude: "claude", codex: "codex" }), []);
+test("a trivial one-off still shows its routed model (one cheap node, no orchestration)", () => {
+  // The user should always see which model will handle their request, and it
+  // must be the quality-routed one (a padding tweak → a cheap model), not a
+  // default. It's a single node — no multi-model orchestration.
+  const plan = __test.specialistPlan({ plan: true, prompt: "change the button padding to 8px" }, { claude: "claude", codex: "codex" });
+  assert.equal(plan.length, 1, "one routed node");
+  assert.ok(plan[0].model, "the node names its model");
 });
 
-test("small prompts avoid orchestration overhead", () => {
-  assert.deepEqual(__test.specialistPlan({ plan: true, prompt: "Fix typo" }, { claude: "claude", codex: "codex" }), []);
+test("planning is skipped entirely when the Deep toggle is off", () => {
+  assert.deepEqual(__test.specialistPlan({ plan: false, prompt: "build a whole app with an API and a UI" }, { claude: "claude", codex: "codex" }), []);
+});
+
+test("small prompts route to one model without multi-model orchestration", () => {
+  const plan = __test.specialistPlan({ plan: true, prompt: "Fix typo" }, { claude: "claude", codex: "codex" });
+  assert.equal(plan.length, 1, "a single routed node, no orchestration");
 });
 
 test("Windows command discovery prefers executable shims over extensionless npm shims", () => {

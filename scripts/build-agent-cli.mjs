@@ -27,7 +27,9 @@ runAgentCli().catch((error) => {
 `;
 
 await mkdir(downloads, { recursive: true });
-const runtime = `${core.trimEnd()}${launcher}`;
+// routingInlined MUST come first so __hyzrRouting is defined before core's
+// destructure. ESM hoists core's node: imports regardless of position.
+const runtime = `${routingInlined}${core.trimEnd()}${launcher}`;
 const runtimeHash = createHash("sha256").update(runtime).digest("hex");
 const version = core.match(/const VERSION = "([^"]+)"/)?.[1] || "unknown";
 await writeFile(path.join(downloads, "hyzr-agent.mjs"), runtime, "utf8");

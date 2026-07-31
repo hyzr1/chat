@@ -237,14 +237,14 @@ export function planForAgent(job, tools) {
   const claude = !!tools?.claude, codex = !!tools?.codex;
   if (!claude && !codex) return [];
 
-  const overall = classifyComplexity(prompt);
+  if (!prompt.trim()) return [];
   const demand = classifyQualityDemand(prompt);
   const raw = decompose(prompt);
 
-  // Only multi-part (an app + an independent asset) or genuinely substantial
-  // single builds are worth surfacing as a routed plan; a trivial one-off just
-  // runs on the default engine.
-  if (raw.length <= 1 && overall === "trivial") return [];
+  // ALWAYS return the routed plan — even a single trivial task runs on the
+  // quality-routed model (e.g. a padding tweak → Luna, not a default), and the
+  // user always sees which model will handle their request and why. A single
+  // node is still a plan; it just isn't multi-model orchestration.
 
   const providerPool = (cap) => {
     let pool = CORE.filter((id) => !LEGACY.has(id));
