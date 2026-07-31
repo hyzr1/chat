@@ -432,6 +432,21 @@ function menuModels(mode: Mode): MenuModel[] {
 function findModel(mode: Mode, id: string) {
   return menuModels(mode).find((m) => m.id === id);
 }
+
+// A one-line conversational turn should behave like Claude Code/Codex itself:
+// answer it directly, without manufacturing a project plan or an
+// "implementation target". Agent still keeps its workspace and tools; this
+// only skips the multi-model planner for obvious small talk.
+function isQuickAgentConversation(prompt: string) {
+  const text = prompt
+    .replace(/^\s*\[Space:[^\]]*\]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length > 120) return false;
+  return /^(?:hi|hello|hey|hiya|yo|good\s+(?:morning|afternoon|evening)|howdy)(?:\s+(?:there|hyzr|claude|codex))?[!.?\s]*$/i.test(text)
+    || /^(?:thanks|thank\s+you|thx|okay|ok|cool|nice|sounds\s+good)[!.?\s]*$/i.test(text)
+    || /^(?:how\s+are\s+you|what(?:'s|\s+is)\s+up)[!.?\s]*$/i.test(text);
+}
 // The subscription model that a given tier routes to (for the routing tree).
 function tierModel(tier: string) {
   const id = LOCAL_TIER_DEFAULT[(tier as "trivial" | "standard" | "hard")] ?? LOCAL_TIER_DEFAULT.standard;
@@ -605,6 +620,10 @@ export default function Home() {
   const [showModels, setShowModels] = useState(false);
   const [showEffort, setShowEffort] = useState(false);
   const [override, setOverride] = useState("auto");
+  // Chat and Agent intentionally keep independent model choices. An empty
+  // Chat choice means "use the subscription-aware default" (Sonnet when
+  // Claude is connected, otherwise Luna on Codex).
+  const [chatModel, setChatModel] = useState("");
   const [mode, setMode] = useState<Mode>("local");
   // Deep Planning defaults ON in Agent mode — live A/B proved it saves 48–99%
   // of weighted subscription usage at equal verified quality (it routes each
@@ -852,6 +871,7 @@ export default function Home() {
         if (p) {
           const prefs = JSON.parse(p);
           if (prefs.mode) setMode(prefs.mode);
+          if (typeof prefs.chatModel === "string") setChatModel(prefs.chatModel);
           if (!active && (prefs.workMode === "chat" || prefs.workMode === "code")) setWorkMode(prefs.workMode);
           if (["dark", "light", "system"].includes(prefs.theme)) setTheme(prefs.theme);
           if (prefs.productPrefs) setProductPrefs({ ...DEFAULT_PRODUCT_PREFS, ...prefs.productPrefs });
@@ -970,9 +990,9 @@ export default function Home() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ mode, workMode, planOn, effort, theme, productPrefs, routingRules, collapsed, modelPool, modelCatalogVersion: 2, routingPolicyVersion: 3 }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ mode, workMode, chatModel, planOn, effort, theme, productPrefs, routingRules, collapsed, modelPool, modelCatalogVersion: 2, routingPolicyVersion: 3 }));
     } catch {}
-  }, [mode, workMode, planOn, effort, theme, productPrefs, routingRules, collapsed, modelPool]);
+  }, [mode, workMode, chatModel, planOn, effort, theme, productPrefs, routingRules, collapsed, modelPool]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: light)");
@@ -1156,6 +1176,16 @@ export default function Home() {
   }, [productPrefs.newChatKey]);
 
   const hasKeys = keys.anthropic || keys.openai;
+  const chatModelOptions = menuModels(mode).filter((model) => {
+    if (mode !== "local" || !agentInfo) return true;
+    return model.engine === "claude" ? agentInfo.claude : agentInfo.codex;
+  });
+  const defaultChatModel = mode === "local"
+    ? (agentInfo?.claude ? "claude-sonnet" : "gpt-5.6-luna")
+    : (chatModelOptions[0]?.id ?? "auto");
+  const effectiveChatModel = chatModelOptions.some((model) => model.id === chatModel)
+    ? chatModel
+    : defaultChatModel;
   const projectNames = Array.from(new Set([
     ...sidebarSpaces.map((space) => space.name),
     ...sessions.flatMap((session) => session.project?.name ? [session.project.name] : []),
@@ -1265,6 +1295,8 @@ export default function Home() {
   // full building surface: projects, tasks, proof, work intake, the pairer.
   function switchWorkMode(next: WorkMode) {
     if (next === "code" && !signedIn) { setShowLogin(true); return; }
+    setShowModels(false);
+    setShowEffort(false);
     setWorkMode(next);
     if (next === "chat") {
       // Chat mode has no workspace views; always land on the conversation.
@@ -1411,6 +1443,7 @@ export default function Home() {
   async function send(preset?: string, baseMessages?: Msg[]) {
     let text = (preset ?? input).trim();
     if (!text || busyRef.current) return;
+    const quickAgentConversation = workMode === "code" && isQuickAgentConversation(text);
     // Both Chat and Agent now run on your Claude/Codex subscription via hyzr.cmd,
     // so both require an account — a guest's first send goes to sign-in.
     if (!signedIn) { setShowLogin(true); return; }
@@ -1618,11 +1651,13 @@ export default function Home() {
               projectId: space?.name || undefined,
               prompt: text,
               history: requestHistory.slice(0, -1),
-              model: override !== "auto" ? override : null,
+              model: workMode === "chat"
+                ? effectiveChatModel
+                : override !== "auto" ? override : null,
               effort,
-              // Chat is a no-tools Swift conversation; Agent builds with routing.
+              // Chat uses one selected model without tools; Agent builds with routing.
               kind: workMode === "code" ? "run" : "chat",
-              plan: workMode === "code" ? planOn : false,
+              plan: workMode === "code" ? (planOn && !quickAgentConversation) : false,
               // The user's allowed-model pool: the Agent routes ONLY within these
               // (e.g. disable Sol/Fable to save usage, or Claude-only). Auto path.
               enabledModelIds: modelPool.local,
@@ -1724,9 +1759,9 @@ export default function Home() {
         body: JSON.stringify({
           messages: requestHistory,
           keys,
-          override,
+          override: workMode === "chat" ? effectiveChatModel : override,
           mode,
-          plan: mode === "local" && planOn,
+          plan: workMode === "code" && mode === "local" && planOn && !quickAgentConversation,
           images,
           enabledModelIds: modelPool[mode],
           sessionId: sid,
@@ -2310,12 +2345,42 @@ export default function Home() {
           </button>
         </div>
         <div className="spacer" />
+        {workMode === "chat" && <div className="model-controls chat-model-controls">
+          <div className="model-picker" style={{ position: "relative" }}>
+            <button
+              className={`tool-btn model-trigger chat-model-trigger ${findModel(mode, effectiveChatModel)?.engine === "claude" ? "is-claude" : "is-codex"}`}
+              onClick={() => setShowModels((shown) => !shown)}
+              aria-label="Choose chat model"
+            >
+              <BrandMark brand={brandFor(findModel(mode, effectiveChatModel)?.engine ?? effectiveChatModel)} size={14} />
+              <span className="picker-name">{shortModelLabel(findModel(mode, effectiveChatModel)?.label ?? "Model")}</span>
+              <IconChevron size={13} className="chev" />
+            </button>
+            {showModels && (
+              <>
+                <button className="model-menu-backdrop" aria-label="Close model menu" onClick={() => setShowModels(false)} />
+                <ModelMenu
+                  models={chatModelOptions}
+                  value={effectiveChatModel}
+                  enabled={chatModelOptions.map((model) => model.id)}
+                  allowAuto={false}
+                  showEffort={false}
+                  onClose={() => setShowModels(false)}
+                  onPick={(id) => {
+                    setChatModel(id);
+                    setShowModels(false);
+                  }}
+                />
+              </>
+            )}
+          </div>
+        </div>}
         {workMode === "code" && <div className="model-controls">
           <div className="model-picker" style={{ position: "relative" }}>
             <button
               className={`tool-btn model-trigger ${override !== "auto" ? "active" : ""}`}
               onClick={() => setShowModels((s) => !s)}
-              aria-label="Choose model and effort"
+              aria-label="Choose model"
             >
               {override === "auto" ? <IconRoute size={14} /> : <BrandMark brand={brandFor(findModel(mode, override)?.engine ?? override)} size={14} />}
               <span className="picker-name">{override === "auto" ? "Auto" : shortModelLabel(findModel(mode, override)?.label ?? "Model")}</span>
@@ -2336,6 +2401,21 @@ export default function Home() {
                     setShowModels(false);
                   }}
                 />
+              </>
+            )}
+          </div>
+          <div className="effort-control">
+            <button
+              className="tool-btn effort-trigger"
+              onClick={() => setShowEffort((shown) => !shown)}
+              aria-label={`Reasoning effort: ${effortName(effort)}`}
+            >
+              <span>{effortName(effort)}</span><IconChevron size={13} className="chev" />
+            </button>
+            {showEffort && (
+              <>
+                <button className="model-menu-backdrop" aria-label="Close effort menu" onClick={() => setShowEffort(false)} />
+                <EffortMenu value={effort} onPick={setEffort} onClose={() => setShowEffort(false)} />
               </>
             )}
           </div>
@@ -2548,7 +2628,7 @@ export default function Home() {
           {LIBRARY_VIEWS.includes(view) ? <LibraryTabs view={view} setView={openView} /> : <div className="top-context">
             <strong>{view === "chat" ? (sessions.find((session) => session.id === currentId)?.title ?? (workMode === "chat" ? "Chat" : VIEW_TITLES.chat)) : VIEW_TITLES[view]}</strong>
             {view === "chat" && currentId && workMode === "code" && <span>Project workspace</span>}
-            {workMode === "chat" && <span>Free model · search</span>}
+            {workMode === "chat" && <span>{findModel(mode, effectiveChatModel)?.label ?? "Chat"}</span>}
           </div>}
           <div className="spacer" />
           {workMode === "code" && showBackgroundRun && (
@@ -2566,11 +2646,6 @@ export default function Home() {
             <button className={mode === "local" ? "on" : ""} onClick={() => switchMode("local")} title="Use local subscriptions">Local</button>
             <button className={mode === "byok" ? "on" : ""} onClick={() => switchMode("byok")} title="Use API keys">API</button>
           </div>}
-          <div className="top-links">
-            <a className="top-link" href="https://code.hyzr.ai" target="_blank" rel="noopener" title="Learn to code — Hyzr Code">
-              Code <IconExternal size={12} />
-            </a>
-          </div>
           <button
             className={`top-icon ${incognito ? "on" : ""}`}
             onClick={() => setIncognito((v) => !v)}
@@ -2912,14 +2987,18 @@ function ModelMenu({
   enabled,
   effort,
   onEffort,
+  allowAuto = true,
+  showEffort = true,
   onPick,
   onClose,
 }: {
   models: MenuModel[];
   value: string;
   enabled: string[];
-  effort: Effort;
-  onEffort: (effort: Effort) => void;
+  effort?: Effort;
+  onEffort?: (effort: Effort) => void;
+  allowAuto?: boolean;
+  showEffort?: boolean;
   onPick: (id: string) => void;
   onClose: () => void;
 }) {
@@ -2944,40 +3023,47 @@ function ModelMenu({
   const modelRow = (id: string, icon: React.ReactNode, label: string) => (
     <button key={id} className={`simple-model-row ${value === id ? "selected" : ""}`} onClick={() => onPick(id)}>
       <span className="simple-model-icon">{icon}</span>
-      <span className="simple-model-copy"><strong>{label}</strong>{MODEL_TAGLINE[id] && <small>{MODEL_TAGLINE[id]}</small>}</span>
+      <span className="simple-model-copy"><strong>{label}</strong></span>
       {value === id && <IconCheck size={15} />}
     </button>
   );
   return (
-    <div className="menu simple-model-menu" onMouseLeave={() => setShowMore(false)}>
+    <div className="menu simple-model-menu" onMouseLeave={() => { setShowMore(false); setEffortOpen(false); }}>
       <div className="menu-mobile-head"><span /><strong>Models</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
       <div className="simple-menu-title">Models</div>
-      {modelRow("auto", <IconRoute size={16} />, "Auto")}
+      {allowAuto && modelRow("auto", <IconRoute size={16} />, "Auto")}
       {featured.map((m) => modelRow(m.id, <BrandMark brand={brandFor(m.engine)} size={16} />, m.label))}
       {/* Effort lives inside the model menu on mobile (Claude-style); on desktop
           it stays a separate slider popover, so this row is hidden there. */}
-      <div className="menu-divider effort-divider" />
-      <button className="menu-drill effort-drill" onClick={() => setEffortOpen(true)}>
-        <span>Effort</span><strong>{effortName(effort)}</strong><IconChevron size={14} />
-      </button>
+      {showEffort && effort && onEffort && <>
+        <div className="menu-divider effort-divider" />
+        <button
+          className={`menu-drill effort-drill ${effortOpen ? "active" : ""}`}
+          onMouseEnter={() => { setShowMore(false); setEffortOpen(true); }}
+          onFocus={() => { setShowMore(false); setEffortOpen(true); }}
+          onClick={() => { setShowMore(false); setEffortOpen((open) => !open); }}
+        >
+          <span>Effort</span><strong>{effortName(effort)}</strong><IconChevron size={14} />
+        </button>
+      </>}
       <div className="menu-divider" />
       <button
         className={`menu-drill ${showMore ? "active" : ""}`}
-        onMouseEnter={() => setShowMore(true)}
-        onFocus={() => setShowMore(true)}
-        onClick={() => setShowMore((current) => !current)}
+        onMouseEnter={() => { setEffortOpen(false); setShowMore(true); }}
+        onFocus={() => { setEffortOpen(false); setShowMore(true); }}
+        onClick={() => { setEffortOpen(false); setShowMore((current) => !current); }}
       >
         <span>More models</span><strong>{moreModels.length}</strong><IconChevron size={14} />
       </button>
       {showMore && (
-        <div className="menu-subpanel simple-model-submenu" onMouseEnter={() => setShowMore(true)}>
+        <div className="menu-subpanel simple-model-submenu" onMouseEnter={() => { setEffortOpen(false); setShowMore(true); }}>
           <div className="subpanel-mobile-head"><button onClick={() => setShowMore(false)} aria-label="Back"><IconChevron size={16} /></button><strong>More models</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
-          <div className="simple-menu-title">More models <small>{enabled.length} in Auto</small></div>
+          <div className="simple-menu-title">More models {allowAuto && <small>{enabled.length} in Auto</small>}</div>
           {(moreModels.length ? moreModels : models).map((m) => modelRow(m.id, <BrandMark brand={brandFor(m.engine)} size={16} />, m.label))}
         </div>
       )}
-      {effortOpen && (
-        <div className="menu-subpanel effort-subpanel">
+      {effortOpen && effort && onEffort && (
+        <div className="menu-subpanel effort-subpanel" onMouseEnter={() => { setShowMore(false); setEffortOpen(true); }}>
           <div className="subpanel-mobile-head"><button onClick={() => setEffortOpen(false)} aria-label="Back"><IconChevron size={16} /></button><strong>Effort</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
           <div className="simple-menu-title">Effort</div>
           {EFFORT_LEVELS.map((level) => (
@@ -3004,15 +3090,6 @@ const EFFORT_DESC: Record<Effort, string> = {
   max: "The hardest problems, takes longer",
   ultra: "Maximum depth. Slowest.",
 };
-// Short taglines shown under the featured models in the mobile picker.
-const MODEL_TAGLINE: Record<string, string> = {
-  auto: "Routes each task to the best model",
-  "gpt-5.6-sol": "For your toughest challenges",
-  "claude-opus": "For complex, high-stakes work",
-  "gpt-5.6-terra": "Efficient for everyday tasks",
-  "claude-sonnet": "Balanced for everyday work",
-};
-
 function EffortMenu({ value, onPick, onClose }: { value: Effort; onPick: (effort: Effort) => void; onClose: () => void }) {
   const index = EFFORT_LEVELS.indexOf(value);
   useEffect(() => {

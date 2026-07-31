@@ -16,6 +16,10 @@ export const MODELS = {
   "claude-fable": { engine: "claude", label: "Claude Fable 5", plan: "Claude Max" },
   "claude-sonnet": { engine: "claude", label: "Claude Sonnet 5", plan: "Claude Max" },
   "claude-haiku": { engine: "claude", label: "Claude Haiku 4.5", plan: "Claude Max" },
+  "claude-opus-4-7": { engine: "claude", label: "Claude Opus 4.7", plan: "Claude Max" },
+  "claude-opus-4-6": { engine: "claude", label: "Claude Opus 4.6", plan: "Claude Max" },
+  "claude-opus-3": { engine: "claude", label: "Claude Opus 3", plan: "Claude Max" },
+  "claude-sonnet-4-6": { engine: "claude", label: "Claude Sonnet 4.6", plan: "Claude Max" },
 };
 const CORE = Object.keys(MODELS);
 
@@ -166,7 +170,8 @@ export function classifyCapability(prompt) {
   return "new_code";
 }
 
-const LEGACY = new Set(); // agent pool has no legacy ids
+// Kept for an explicit user choice, but excluded from Auto routing.
+const LEGACY = new Set(["claude-opus-4-7", "claude-opus-4-6", "claude-opus-3", "claude-sonnet-4-6"]);
 function qualityTolerance(tier, bias) {
   const byTier = { hard: 0.25, standard: 0.7, trivial: 3.5 };
   const byBias = { quality: 0.75, balanced: 1.0, cheap: 1.4 };
@@ -251,13 +256,16 @@ const MODEL_BLURB = {
   "claude-haiku": "Cheapest Claude — fast, mechanical, high-volume work.",
 };
 
-// Hyzr Swift tier — the light, token-saving pool Chat runs on (best-first).
-export const HYZR_SWIFT = ["gpt-5.6-luna", "claude-haiku", "gpt-5.4-mini"];
-// The cheapest Swift model the connected providers can run (no routing).
-export function chatModelFor(tools) {
-  const usable = HYZR_SWIFT.filter((id) => MODELS[id] && (MODELS[id].engine === "claude" ? tools?.claude : tools?.codex));
-  if (!usable.length) return null;
-  const id = usable.reduce((a, b) => (usageWeight(b) < usageWeight(a) ? b : a));
+// Chat uses one user-selected model directly. There is no routing or task split.
+export function chatModelFor(tools, requestedModel = "") {
+  const requested = String(requestedModel || "");
+  const requestedMeta = MODELS[requested];
+  if (requestedMeta && (requestedMeta.engine === "claude" ? tools?.claude : tools?.codex)) {
+    return { engine: requestedMeta.engine, model: requested, label: requestedMeta.label };
+  }
+  // Subscription-aware default: Sonnet on Claude, Luna on Codex-only setups.
+  const id = tools?.claude ? "claude-sonnet" : tools?.codex ? "gpt-5.6-luna" : "";
+  if (!id) return null;
   return { engine: MODELS[id].engine, model: id, label: MODELS[id].label };
 }
 

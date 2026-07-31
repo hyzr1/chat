@@ -148,7 +148,7 @@ test("hosted computer setup is a compact self-pairing terminal download", async 
   await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
   await expect(page.locator(".pair-cta-download")).toHaveAttribute("href", "/api/agent/download?platform=windows");
   await expect(page.locator(".pair-cta-download")).toContainText("Download");
-  await page.locator("button.agent-presence").click();
+  await page.locator(".pair-cta-btn").click();
   await expect(page.getByRole("heading", { name: "Connect your computer" })).toBeVisible();
   const download = page.locator(".pair-download");
   await expect(download).toContainText(/Download hyzr/);
@@ -188,12 +188,12 @@ test("a known offline computer asks to reopen Hyzr instead of pairing again", as
   await page.goto("/");
   await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
   await expect(page.locator(".pair-cta-download")).toHaveAttribute("href", "/api/agent/download?platform=windows");
-  const suggestionsBox = await page.locator(".suggestions").boundingBox();
+  const composerBox = await page.locator(".center .composer").boundingBox();
   const offlineBox = await page.locator(".pair-cta.known-offline").boundingBox();
-  expect(suggestionsBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
   expect(offlineBox).not.toBeNull();
-  expect(offlineBox!.y - (suggestionsBox!.y + suggestionsBox!.height)).toBeGreaterThanOrEqual(40);
-  await page.locator("button.agent-presence").click();
+  expect(offlineBox!.y - (composerBox!.y + composerBox!.height)).toBeGreaterThanOrEqual(40);
+  await page.locator(".pair-cta-btn").click();
   await expect(page.getByText("My PC is offline")).toBeVisible();
   await expect(page.getByText("Reopen Hyzr on your computer")).toBeVisible();
   await expect(page.getByText(/every launch creates a fresh one-time code/i)).toBeVisible();
@@ -207,6 +207,7 @@ test("opening and closing settings preserves the desktop sidebar", async ({ page
   const sidebar = page.locator(".sidebar");
   await expect(sidebar).not.toHaveClass(/collapsed/);
   await page.locator(".side-account").click();
+  await page.getByRole("button", { name: "All settings" }).click();
   await expect(page.locator(".settings-modal")).toBeVisible();
   await expect(sidebar).not.toHaveClass(/collapsed/);
   const aboutMark = page.getByRole("button", { name: /About Hyzr Chat/ }).locator(".hyzr-mark");
@@ -223,6 +224,7 @@ test("compact model controls are theme-safe and expose visual effort", async ({ 
   await createTestAccount(page);
   await page.goto("/");
   await expect(page.getByRole("link", { name: /^Code$/ })).toHaveCount(0);
+  await page.locator(".workmode-toggle").getByRole("tab", { name: "Home" }).click();
   const chatComposerBox = await page.locator(".center .composer").boundingBox();
   await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
   await page.waitForTimeout(280);
@@ -248,6 +250,13 @@ test("compact model controls are theme-safe and expose visual effort", async ({ 
   expect(modelSubmenuBox!.y + modelSubmenuBox!.height).toBeLessThanOrEqual(892);
   await page.mouse.move(24, 220);
   await expect(page.locator(".simple-model-submenu")).toHaveCount(0);
+  await page.locator(".effort-drill").hover();
+  await expect(page.locator(".effort-subpanel")).toBeVisible();
+  await page.getByRole("button", { name: "More models" }).hover();
+  await expect(page.locator(".effort-subpanel")).toHaveCount(0);
+  await expect(page.locator(".simple-model-submenu")).toBeVisible();
+  await page.locator(".model-menu-backdrop").click({ position: { x: 4, y: 4 } });
+  await expect(page.locator(".simple-model-menu")).toHaveCount(0);
   await page.getByRole("button", { name: "Choose model" }).click();
   await page.getByRole("button", { name: /Reasoning effort:/ }).click();
   await expect(page.locator(".effort-help")).toHaveCount(0);
@@ -262,6 +271,69 @@ test("compact model controls are theme-safe and expose visual effort", async ({ 
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Work intake" }).click();
   await expect(page.locator(".intake-source-tabs").getByRole("button", { name: "GitHub" }).locator("svg")).toBeVisible();
+});
+
+test("Chat has an independent direct model picker and sends the selected model", async ({ page }) => {
+  await createTestAccount(page);
+  const agent = {
+    host: "Chat PC", platform: "win32", version: "1.2.4", node: "v24",
+    claude: true, codex: true, git: true, gh: true, engine: "claude+codex",
+  };
+  await page.route("**/api/setup", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ hosted: true, agentConnected: true, ready: true, agent }),
+  }));
+  let submitted: any = null;
+  await page.route("**/api/agent/enqueue", async (route) => {
+    submitted = (await route.request().postDataJSON()).job;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, jobId: "chat-model-run" }) });
+  });
+  await page.route("**/api/agent/events**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ events: [{ type: "text", text: "Hello from Opus." }, { type: "done" }], cursor: 2 }),
+  }));
+  await page.goto("/");
+  const picker = page.getByRole("button", { name: "Choose chat model" });
+  await expect(picker).toContainText("Sonnet 5");
+  await picker.click();
+  await page.getByRole("button", { name: "Claude Opus 4.8", exact: true }).click();
+  await expect(picker).toContainText("Opus 4.8");
+  await page.locator("textarea").fill("hello");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Hello from Opus.")).toBeVisible();
+  expect(submitted).toMatchObject({ kind: "chat", model: "claude-opus", plan: false });
+});
+
+test("a greeting in Agent skips project planning but remains an Agent run", async ({ page }) => {
+  await createTestAccount(page);
+  const agent = {
+    host: "Agent PC", platform: "win32", version: "1.2.4", node: "v24",
+    claude: true, codex: true, git: true, gh: true, engine: "claude+codex",
+  };
+  await page.route("**/api/setup", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ hosted: true, agentConnected: true, ready: true, agent }),
+  }));
+  let submitted: any = null;
+  await page.route("**/api/agent/enqueue", async (route) => {
+    submitted = (await route.request().postDataJSON()).job;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, jobId: "agent-greeting-run" }) });
+  });
+  await page.route("**/api/agent/events**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ events: [{ type: "text", text: "Hey! What are we working on?" }, { type: "done" }], cursor: 2 }),
+  }));
+  await page.route("**/api/workspace**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [], entry: null, count: 0 }) }));
+  await page.goto("/");
+  await page.locator(".composer-modes").getByRole("button", { name: "Agent" }).click();
+  await page.locator("textarea").fill("hello");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Hey! What are we working on?")).toBeVisible();
+  expect(submitted).toMatchObject({ kind: "run", plan: false });
 });
 
 test("Preview starts a project dev server even before an HTML build exists", async ({ page }) => {

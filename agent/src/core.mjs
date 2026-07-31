@@ -244,6 +244,17 @@ function engineFor(job, tools) {
 function providerModel(engine, requested) {
   const id = String(requested || "");
   if (engine === "claude") {
+    const exact = {
+      "claude-fable": "claude-fable-5",
+      "claude-opus": "claude-opus-4-8",
+      "claude-sonnet": "claude-sonnet-5",
+      "claude-haiku": "claude-haiku-4-5-20251001",
+      "claude-opus-4-7": "claude-opus-4-7",
+      "claude-opus-4-6": "claude-opus-4-6",
+      "claude-opus-3": "claude-3-opus",
+      "claude-sonnet-4-6": "claude-sonnet-4-6",
+    }[id];
+    if (exact) return exact;
     if (/haiku/i.test(id)) return "haiku";
     if (/sonnet/i.test(id)) return "sonnet";
     if (/opus|fable/i.test(id)) return "opus";
@@ -927,7 +938,7 @@ const CHAT_GUIDANCE =
   "anything on their computer, tell them to switch to Agent mode for that. Keep replies focused and helpful.";
 
 async function handleChat(job, context) {
-  const pick = chatModelFor(context.tools);
+  const pick = chatModelFor(context.tools, job.model);
   if (!pick) {
     await context.emit(job.id, "error", "No chat model is available. Sign in to Claude Code or Codex, then reopen hyzr.cmd.");
     return;
@@ -935,7 +946,7 @@ async function handleChat(job, context) {
   await context.emit(job.id, "route", "", {
     modelId: pick.model, modelLabel: pick.label, provider: pick.engine,
     tier: "trivial", capability: "conversation",
-    reason: "Hyzr Swift — the cheapest connected model, for plain chat.",
+    reason: job.model ? "Selected directly for this chat." : "Subscription default for Chat.",
   });
   const runner = pick.engine === "codex" ? runCodex : runClaude;
   const cwd = safeWorkspace(context.workspaceRoot, "hyzr-chat-scratch");

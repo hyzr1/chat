@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { __test } from "../src/core.mjs";
-import { parseRouterPlan, buildRouterPrompt } from "../src/routing.mjs";
+import { parseRouterPlan, buildRouterPrompt, chatModelFor } from "../src/routing.mjs";
 
 test("one conversation always resolves to one workspace", () => {
   const root = path.join(os.tmpdir(), "hyzr-test-workspaces");
@@ -23,6 +23,19 @@ test("explicit provider model wins before prompt heuristics", () => {
   const tools = { claude: "claude", codex: "codex" };
   assert.equal(__test.engineFor({ model: "claude-sonnet", prompt: "fix tests" }, tools), "claude");
   assert.equal(__test.engineFor({ model: "gpt-5.6-sol", prompt: "write a poem" }, tools), "codex");
+});
+
+test("Chat defaults by subscription and honors a direct model choice", () => {
+  assert.equal(chatModelFor({ claude: "claude", codex: "codex" }).model, "claude-sonnet");
+  assert.equal(chatModelFor({ claude: "", codex: "codex" }).model, "gpt-5.6-luna");
+  assert.equal(chatModelFor({ claude: "claude", codex: "codex" }, "claude-opus").model, "claude-opus");
+  assert.equal(chatModelFor({ claude: "claude", codex: "codex" }, "gpt-5.6-sol").model, "gpt-5.6-sol");
+});
+
+test("direct Claude choices preserve their exact provider model", () => {
+  assert.equal(__test.providerModel("claude", "claude-opus"), "claude-opus-4-8");
+  assert.equal(__test.providerModel("claude", "claude-fable"), "claude-fable-5");
+  assert.equal(__test.providerModel("claude", "claude-sonnet-4-6"), "claude-sonnet-4-6");
 });
 
 test("the bridge forwards commands without injecting preview restrictions", () => {

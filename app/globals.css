@@ -5173,6 +5173,22 @@ select {
 .model-trigger,.effort-trigger { height:34px; min-height:34px; }
 .model-trigger { max-width:170px; }
 .model-trigger > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-model-trigger {
+  min-width:112px;
+  max-width:178px;
+  justify-content:center;
+}
+.chat-model-trigger.is-claude {
+  border-color:color-mix(in srgb,#8b5cf6 42%,var(--border));
+  background:color-mix(in srgb,#8b5cf6 9%,var(--panel));
+  color:color-mix(in srgb,#8b5cf6 76%,var(--text));
+}
+.chat-model-trigger.is-codex {
+  border-color:var(--border-strong);
+  background:var(--panel-hi);
+  color:var(--text);
+}
+.chat-model-trigger:hover { filter:brightness(1.04); }
 .effort-trigger { min-width:68px; padding-inline:11px; }
 .simple-model-menu {
   width:246px;
@@ -5398,6 +5414,8 @@ select {
   .model-controls { flex: 0 1 auto; min-width: 0; max-width: none; margin-left: auto; }
   .model-controls .model-picker { flex: 0 1 auto; max-width: 150px; }
   .model-controls .model-picker .tool-btn { max-width: 150px; }
+  .chat-model-controls .model-picker,.chat-model-controls .model-picker .tool-btn { max-width: 132px; }
+  .chat-model-trigger { min-width: 0; }
   .model-trigger .brand-mark, .model-trigger .brand-mark svg { flex: 0 0 auto; }
   .composer-row > .round-btn { flex: 0 0 34px; }  /* voice/mic stays on mobile */
   .send { flex: 0 0 34px; }

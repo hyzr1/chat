@@ -17,6 +17,10 @@ const MODELS = {
   "claude-fable": { engine: "claude", label: "Claude Fable 5", plan: "Claude Max" },
   "claude-sonnet": { engine: "claude", label: "Claude Sonnet 5", plan: "Claude Max" },
   "claude-haiku": { engine: "claude", label: "Claude Haiku 4.5", plan: "Claude Max" },
+  "claude-opus-4-7": { engine: "claude", label: "Claude Opus 4.7", plan: "Claude Max" },
+  "claude-opus-4-6": { engine: "claude", label: "Claude Opus 4.6", plan: "Claude Max" },
+  "claude-opus-3": { engine: "claude", label: "Claude Opus 3", plan: "Claude Max" },
+  "claude-sonnet-4-6": { engine: "claude", label: "Claude Sonnet 4.6", plan: "Claude Max" },
 };
 const CORE = Object.keys(MODELS);
 
@@ -167,7 +171,8 @@ function classifyCapability(prompt) {
   return "new_code";
 }
 
-const LEGACY = new Set(); // agent pool has no legacy ids
+// Kept for an explicit user choice, but excluded from Auto routing.
+const LEGACY = new Set(["claude-opus-4-7", "claude-opus-4-6", "claude-opus-3", "claude-sonnet-4-6"]);
 function qualityTolerance(tier, bias) {
   const byTier = { hard: 0.25, standard: 0.7, trivial: 3.5 };
   const byBias = { quality: 0.75, balanced: 1.0, cheap: 1.4 };
@@ -252,13 +257,16 @@ const MODEL_BLURB = {
   "claude-haiku": "Cheapest Claude — fast, mechanical, high-volume work.",
 };
 
-// Hyzr Swift tier — the light, token-saving pool Chat runs on (best-first).
-const HYZR_SWIFT = ["gpt-5.6-luna", "claude-haiku", "gpt-5.4-mini"];
-// The cheapest Swift model the connected providers can run (no routing).
-function chatModelFor(tools) {
-  const usable = HYZR_SWIFT.filter((id) => MODELS[id] && (MODELS[id].engine === "claude" ? tools?.claude : tools?.codex));
-  if (!usable.length) return null;
-  const id = usable.reduce((a, b) => (usageWeight(b) < usageWeight(a) ? b : a));
+// Chat uses one user-selected model directly. There is no routing or task split.
+function chatModelFor(tools, requestedModel = "") {
+  const requested = String(requestedModel || "");
+  const requestedMeta = MODELS[requested];
+  if (requestedMeta && (requestedMeta.engine === "claude" ? tools?.claude : tools?.codex)) {
+    return { engine: requestedMeta.engine, model: requested, label: requestedMeta.label };
+  }
+  // Subscription-aware default: Sonnet on Claude, Luna on Codex-only setups.
+  const id = tools?.claude ? "claude-sonnet" : tools?.codex ? "gpt-5.6-luna" : "";
+  if (!id) return null;
   return { engine: MODELS[id].engine, model: id, label: MODELS[id].label };
 }
 
@@ -673,6 +681,17 @@ function engineFor(job, tools) {
 function providerModel(engine, requested) {
   const id = String(requested || "");
   if (engine === "claude") {
+    const exact = {
+      "claude-fable": "claude-fable-5",
+      "claude-opus": "claude-opus-4-8",
+      "claude-sonnet": "claude-sonnet-5",
+      "claude-haiku": "claude-haiku-4-5-20251001",
+      "claude-opus-4-7": "claude-opus-4-7",
+      "claude-opus-4-6": "claude-opus-4-6",
+      "claude-opus-3": "claude-3-opus",
+      "claude-sonnet-4-6": "claude-sonnet-4-6",
+    }[id];
+    if (exact) return exact;
     if (/haiku/i.test(id)) return "haiku";
     if (/sonnet/i.test(id)) return "sonnet";
     if (/opus|fable/i.test(id)) return "opus";
@@ -1356,7 +1375,7 @@ const CHAT_GUIDANCE =
   "anything on their computer, tell them to switch to Agent mode for that. Keep replies focused and helpful.";
 
 async function handleChat(job, context) {
-  const pick = chatModelFor(context.tools);
+  const pick = chatModelFor(context.tools, job.model);
   if (!pick) {
     await context.emit(job.id, "error", "No chat model is available. Sign in to Claude Code or Codex, then reopen hyzr.cmd.");
     return;
@@ -1364,7 +1383,7 @@ async function handleChat(job, context) {
   await context.emit(job.id, "route", "", {
     modelId: pick.model, modelLabel: pick.label, provider: pick.engine,
     tier: "trivial", capability: "conversation",
-    reason: "Hyzr Swift — the cheapest connected model, for plain chat.",
+    reason: job.model ? "Selected directly for this chat." : "Subscription default for Chat.",
   });
   const runner = pick.engine === "codex" ? runCodex : runClaude;
   const cwd = safeWorkspace(context.workspaceRoot, "hyzr-chat-scratch");
