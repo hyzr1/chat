@@ -106,7 +106,7 @@ function classifyComplexity(prompt) {
   return "standard";
 }
 
-const QUALITY_CUES = /\b(high[- ]?end|premium|polished|beautiful|stunning|gorgeous|world[- ]?class|production[- ]?grade|pixel[- ]?perfect|top[- ]?(?:tier|quality)|best (?:possible|in class)|impress|portfolio|award|really (?:important|matters)|mission[- ]?critical|critical|complex|complicated|tricky|intricate|subtle|hard(?:est)? (?:bug|problem)|can'?t (?:figure|solve|crack)|stuck on|thorough(?:ly)?|robust|enterprise|sophisticated|elegant|meticulous)\b/i;
+const QUALITY_CUES = /\b(high[- ]?(?:end|quality|fidelity|res(?:olution)?)|hi[- ]?fi|premium|polished|beautiful|stunning|gorgeous|world[- ]?class|production[- ]?grade|professional(?:[- ]?grade)?|pixel[- ]?perfect|top[- ]?(?:tier|quality|notch)|triple[- ]?a|aaa|first[- ]?rate|best (?:possible|in class)|exactly (?:like|the same)|impress|portfolio|award|really (?:important|matters)|mission[- ]?critical|critical|complex|complicated|tricky|intricate|subtle|hard(?:est)? (?:bug|problem)|can'?t (?:figure|solve|crack)|stuck on|thorough(?:ly)?|robust|enterprise|sophisticated|elegant|meticulous)\b/i;
 const SIMPLE_CUES = /\b(basic|simple|quick|minimal|rough|prototype|proto|mvp|throwaway|placeholder|draft|boilerplate|scaffold|bare[- ]?bones|barebones|just a|nothing fancy|dead simple|trivial|small tweak|one[- ]?liner)\b/i;
 function classifyQualityDemand(prompt) {
   const t = prompt.toLowerCase();
@@ -146,7 +146,7 @@ function classifyCapability(prompt) {
     ["architecture", /\b(architecture|system design|data model|scalab|distributed|microservice|technical design)\b/],
     ["debugging", /\b(debug|bug|broken|crash|root cause|race condition|doesn['’]?t work|fix this)\b/],
     ["code_review", /\b(code review|review this|security audit|find issues|check for bugs)\b/],
-    ["frontend_design", /\b(frontend|web ?site|web ?app|ui|ux|css|responsive|landing page|settings page|interface|design system|animation|webgl|gsap)\b/],
+    ["frontend_design", /\b(frontend|web ?site|web ?app|ui|ux|css|responsive|landing page|settings page|interface|design system|animation|webgl|gsap|game|gameplay|arcade|clone of|exactly like)\b/],
     ["cybersecurity", /\b(cyber|vulnerability|exploit|penetration|threat model|malware|security)\b/],
     ["science", /\b(science|biology|chemistry|medical|health|genomic|physics|research paper)\b/],
     ["research_search", /\b(research|search the web|browse|sources|citations|latest|compare products)\b/],
