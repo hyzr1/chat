@@ -9,7 +9,7 @@ import { rankModelsFromSamples, type RoutingFeedbackSample } from "./routing-fee
 import { productEnv } from "./product";
 
 export type CostBias = "cheap" | "balanced" | "quality";
-export interface CostOptions { ceilingId?: string; bias?: CostBias; demand?: number; skills?: Skill[] }
+export interface CostOptions { ceilingId?: string; bias?: CostBias; demand?: number; skills?: Skill[]; planLoad?: Record<"claude" | "codex", number> }
 
 export interface LocalRouteDecision {
   model: LocalModel;
@@ -98,13 +98,25 @@ function qualityTolerance(tier: Tier, bias: CostBias): number {
 
 // Pick the model that clears this exact subtask's (skill-refined) quality bar at
 // the lowest subscription usage. Quality is the gate; usage is only the tiebreak.
-function qualityAwareSelect(pool: string[], capability: TaskCapability, tier: Tier, bias: CostBias, skills?: Skill[], demand = 1): string {
+function qualityAwareSelect(pool: string[], capability: TaskCapability, tier: Tier, bias: CostBias, skills?: Skill[], demand = 1, planLoad?: Record<"claude" | "codex", number>): string {
   if (!pool.length) return LOCAL_TIER_DEFAULT[tier];
   const scored = pool.map((id) => ({ id, q: skillQuality(id, capability, skills), w: planUsageWeight(id), c: modelCostWeight(id) }));
   const qmax = Math.max(...scored.map((s) => s.q));
   const tol = qualityTolerance(tier, bias) * demand;
   const eligible = scored.filter((s) => s.q >= qmax - tol);
-  eligible.sort((a, b) => a.w - b.w || b.q - a.q || a.c - b.c);
+  // Session balance, quality-neutral. Among equal-weight models whose quality is
+  // indistinguishable (within NOISE_EPS — matrix scores are estimates), prefer
+  // the less-loaded plan so neither subscription drains first. A real quality gap
+  // (> eps) always wins; savings and quality are never traded for balance.
+  const NOISE_EPS = 0.15;
+  const loadOf = (id: string) => planLoad ? (planLoad[LOCAL_MODELS[id].engine] ?? 0) : 0;
+  eligible.sort((a, b) =>
+    a.w - b.w
+    || (Math.abs(a.q - b.q) > NOISE_EPS ? b.q - a.q : 0)
+    || loadOf(a.id) - loadOf(b.id)
+    || b.q - a.q
+    || a.c - b.c,
+  );
   return eligible[0]?.id ?? pool[0];
 }
 
@@ -136,7 +148,7 @@ function baselineSelection(capability: TaskCapability, complexity: Tier, enabled
     return { modelId: ordered[0] ?? cheapestOf(pool)!, ordered, constrainedProvider, customPriority, source: "custom" as const };
   }
 
-  const modelId = qualityAwareSelect(pool, capability, complexity, bias, cost?.skills, cost?.demand);
+  const modelId = qualityAwareSelect(pool, capability, complexity, bias, cost?.skills, cost?.demand, cost?.planLoad);
   const source: "provider" | "cost" | "default" = constrainedProvider !== "auto" ? "provider" : bias === "quality" ? "default" : "cost";
   return { modelId, ordered, constrainedProvider, customPriority, source };
 }
