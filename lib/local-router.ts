@@ -228,7 +228,7 @@ export function classifyCapability(prompt: string): { capability: TaskCapability
     ["research_search", /\b(research|search the web|browse|sources|citations|latest|compare products)\b/],
     ["computer_use", /\b(browser automation|computer use|playwright|click|desktop|spreadsheet app|terminal|powershell|shell command|dev server|restart server|port check)\b/],
     ["vision", /\b(screenshot|analyze this image|read this image|visual inspection|diagram)\b/],
-    ["data_analysis", /\b(data analysis|dataset|statistics|spreadsheet|csv|forecast|financial model)\b/],
+    ["data_analysis", /\b(data analysis|statistical analysis|statistics|regression|forecast|predictive model|financial model|analyze the data|correlation|hypothesis test)\b/],
     ["documents", /\b(presentation|slide deck|document|report|pdf|proposal|memo)\b/],
     ["creative_ideation", /\b(brainstorm|ideas|creative|story|naming|concepts|copywriting)\b/],
     ["organization", /\b(organize|plan|schedule|roadmap|prioritize|to-?do|workflow)\b/],
