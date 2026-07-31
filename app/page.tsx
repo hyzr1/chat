@@ -606,7 +606,11 @@ export default function Home() {
   const [showEffort, setShowEffort] = useState(false);
   const [override, setOverride] = useState("auto");
   const [mode, setMode] = useState<Mode>("local");
-  const [planOn, setPlanOn] = useState(false);
+  // Deep Planning defaults ON in Agent mode — live A/B proved it saves 48–99%
+  // of weighted subscription usage at equal verified quality (it routes each
+  // subtask to the cheapest model that still passes verification), so it is a
+  // no-brainer default. Users can still toggle it off per session.
+  const [planOn, setPlanOn] = useState(true);
   const [effort, setEffort] = useState<Effort>("high");
   const [theme, setTheme] = useState<Theme>(() => {
     // Match the pre-paint theme (set by the inline script in layout) so the
@@ -853,9 +857,9 @@ export default function Home() {
           if (prefs.productPrefs) setProductPrefs({ ...DEFAULT_PRODUCT_PREFS, ...prefs.productPrefs });
           if (prefs.routingRules && prefs.routingPolicyVersion === 3) setRoutingRules({ ...DEFAULT_ROUTING_RULES, ...prefs.routingRules });
           else setRoutingRules(DEFAULT_ROUTING_RULES);
-          // Planning is an explicit per-session action. Agent mode must open
-          // as a direct Claude/Codex session instead of silently restoring
-          // orchestration from an earlier visit.
+          // Deep Planning now defaults ON in Agent mode (proven no-brainer),
+          // set by workMode entry rather than restored here, so a fresh Agent
+          // visit always opens with orchestration ready.
           if (["low", "medium", "high", "xhigh", "max", "ultra"].includes(prefs.effort)) setEffort(prefs.effort);
           // Desktop remembers its compact sidebar. Mobile starts closed in the
           // layout handshake and must not have a late preference read override
@@ -1266,6 +1270,9 @@ export default function Home() {
       // Chat mode has no workspace views; always land on the conversation.
       if (!CHAT_MODE_VIEWS.has(view)) openView("chat");
       setPlanOn(false);
+    } else {
+      // Agent mode opens with Deep Planning on by default (proven no-brainer).
+      setPlanOn(true);
     }
     if (isMobileViewport()) setCollapsed(true);
   }
@@ -1296,7 +1303,8 @@ export default function Home() {
   function openSession(s: Session) {
     const surface = inferredSessionSurface(s);
     setWorkMode(surface);
-    setPlanOn(false);
+    // Agent sessions reopen with Deep Planning on by default; chat never plans.
+    setPlanOn(surface === "code");
     setCurrentId(s.id);
     applyingRemoteMessagesRef.current = true;
     setMessages(s.messages);
