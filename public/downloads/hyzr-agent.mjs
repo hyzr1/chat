@@ -247,13 +247,19 @@ function planForAgent(job, tools) {
   // user always sees which model will handle their request and why. A single
   // node is still a plan; it just isn't multi-model orchestration.
 
+  // The user's allowed-model pool (e.g. Sol/Fable disabled to save usage, or
+  // Claude-only). Routing picks the best model WITHIN this set. Empty/absent ⇒
+  // all core models.
+  const allowed = Array.isArray(job.enabledModelIds) && job.enabledModelIds.length
+    ? new Set(job.enabledModelIds.filter((id) => MODELS[id]))
+    : null;
+  const available = (id) => (MODELS[id].engine === "claude" ? claude : codex) && (!allowed || allowed.has(id));
   const providerPool = (cap) => {
-    let pool = CORE.filter((id) => !LEGACY.has(id));
+    let pool = CORE.filter((id) => !LEGACY.has(id) && available(id));
     if (cap === "media_generation") pool = pool.filter((id) => MODELS[id].engine === "codex");
     else if (claude && !codex) pool = pool.filter((id) => MODELS[id].engine === "claude");
     else if (codex && !claude) pool = pool.filter((id) => MODELS[id].engine === "codex");
-    // If a provider is missing, don't route into an empty pool.
-    return pool.filter((id) => (MODELS[id].engine === "claude" ? claude : codex));
+    return pool;
   };
 
   const bias = demand <= 0.6 ? "quality" : demand >= 1.6 ? "cheap" : "balanced";

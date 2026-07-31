@@ -4074,7 +4074,17 @@ select {
 .models-settings-head span { color: var(--text-faint); font-size: 10px; }
 .models-settings-head button { padding: 6px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text-soft); font-size: 10px; cursor: pointer; }
 .model-settings-list { max-width: 900px; margin: 0 auto; overflow: hidden; border: 1px solid var(--border); border-radius: 13px; background: var(--panel); }
-.model-setting-row { min-height: 62px; display: grid; grid-template-columns: 34px minmax(0,1fr) 100px 40px; align-items: center; gap: 11px; padding: 8px 13px; border-bottom: 1px solid var(--border); opacity: .58; }
+.model-setting-row { min-height: 62px; display: grid; grid-template-columns: 34px minmax(0,1fr) 78px 88px 40px; align-items: center; gap: 11px; padding: 8px 13px; border-bottom: 1px solid var(--border); opacity: .58; }
+/* One-tap allowlist presets + per-model usage-weight badge. */
+.model-presets { max-width: 900px; margin: 0 auto 10px; display: flex; flex-wrap: wrap; gap: 7px; }
+.model-preset { padding: 7px 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-soft); font-size: 11.5px; font-weight: 500; cursor: pointer; transition: border-color .13s, color .13s, background .13s; }
+.model-preset:hover { border-color: var(--border-strong); color: var(--text); }
+.model-preset.on { background: var(--panel); border-color: var(--border-strong); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.model-weight { justify-self: end; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); font: 9px var(--font-mono); font-style: normal; white-space: nowrap; }
+.model-weight.high { color: #d9534f; border-color: color-mix(in srgb, #d9534f 40%, var(--border)); }
+.model-weight.mid { color: #d9a441; border-color: color-mix(in srgb, #d9a441 40%, var(--border)); }
+.model-weight.low { color: #4a9d6b; border-color: color-mix(in srgb, #4a9d6b 40%, var(--border)); }
+.model-plan-tag { color: var(--text-faint); font-size: 9px; font-style: normal; text-align: right; white-space: nowrap; }
 .model-setting-row:last-child { border: 0; }
 .model-setting-row.enabled { opacity: 1; }
 .model-setting-mark { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 9px; background: var(--field); }
