@@ -108,8 +108,15 @@ function qualityAwareSelect(pool: string[], capability: TaskCapability, tier: Ti
   return eligible[0]?.id ?? pool[0];
 }
 
+// Previous-generation / compatibility models: routable by manual override, never
+// auto-selected (a current-gen model always dominates; they must not win a
+// usage-weight tiebreak).
+const LEGACY_MODELS = new Set(["claude-opus-4-7", "claude-opus-4-6", "claude-opus-3", "claude-sonnet-4-6"]);
+
 function baselineSelection(capability: TaskCapability, complexity: Tier, enabledModelIds?: string[], routingRules?: RoutingRules, providerPreference: ProviderPreference = "auto", cost?: CostOptions) {
-  const enabled = (enabledModelIds?.length ? enabledModelIds : Object.keys(LOCAL_MODELS)).filter((id) => LOCAL_MODELS[id]);
+  const enabledRaw = (enabledModelIds?.length ? enabledModelIds : Object.keys(LOCAL_MODELS)).filter((id) => LOCAL_MODELS[id]);
+  const enabledCurrent = enabledRaw.filter((id) => !LEGACY_MODELS.has(id));
+  const enabled = enabledCurrent.length ? enabledCurrent : enabledRaw;
   const constrainedProvider: ProviderPreference = capability === "media_generation" ? "codex" : providerPreference;
   let providerEnabled = constrainedProvider === "auto" ? enabled : enabled.filter((id) => LOCAL_MODELS[id].engine === constrainedProvider);
   if (!providerEnabled.length) providerEnabled = enabled;
