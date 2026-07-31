@@ -32,6 +32,7 @@ import {
   IconArrowUp,
   IconChevron,
   IconSparkles,
+  IconChat,
   IconCpu,
   IconImage,
   IconCode,
@@ -606,7 +607,17 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("local");
   const [planOn, setPlanOn] = useState(false);
   const [effort, setEffort] = useState<Effort>("high");
-  const [theme, setTheme] = useState<Theme>("light");
+  const [theme, setTheme] = useState<Theme>(() => {
+    // Match the pre-paint theme (set by the inline script in layout) so the
+    // theme effect doesn't flip the UI on load.
+    if (typeof window === "undefined") return "light";
+    try {
+      const raw = localStorage.getItem(PREFS_KEY) || localStorage.getItem(LEGACY_PREFS_KEY);
+      const saved = raw ? JSON.parse(raw).theme : null;
+      if (saved === "dark" || saved === "light" || saved === "system") return saved;
+    } catch {}
+    return "light";
+  });
   const [productPrefs, setProductPrefs] = useState<ProductPrefs>(DEFAULT_PRODUCT_PREFS);
   const [view, setView] = useState<View>("chat");
   const [workMode, setWorkMode] = useState<WorkMode>("chat");
@@ -738,6 +749,10 @@ export default function Home() {
     const root = document.documentElement;
     const viewport = window.visualViewport;
     const syncViewport = () => {
+      // Ignore pinch-zoom. While zoomed in the visual viewport shrinks; rewriting
+      // --app-height (or scrolling) then makes the page jump to random spots
+      // instead of zooming cleanly. Only track genuine height changes (keyboard).
+      if (viewport && viewport.scale > 1.01) return;
       // Fall back on a falsy 0 (some embedded/edge cases report height 0, which
       // would otherwise collapse the whole app to zero height).
       const height = viewport?.height || window.innerHeight || 0;
@@ -745,11 +760,13 @@ export default function Home() {
     };
     const timers = new Set<number>();
     const settleViewport = () => {
+      if (viewport && viewport.scale > 1.01) return;
       window.scrollTo(0, 0);
       syncViewport();
       for (const delay of [40, 180, 420]) {
         const timer = window.setTimeout(() => {
           timers.delete(timer);
+          if (viewport && viewport.scale > 1.01) return;
           window.scrollTo(0, 0);
           syncViewport();
         }, delay);
@@ -2245,22 +2262,13 @@ export default function Home() {
           )}
         </div>
         <div className="composer-modes">
-          <button className={`cm-pill ${workMode === "chat" ? "on" : ""}`} onClick={() => switchWorkMode("chat")}>
-            <IconSearch size={14} /> Chat
+          <button className={`cm-pill ${workMode === "chat" ? "on" : ""}`} onClick={() => switchWorkMode("chat")} title="Chat" aria-label="Chat">
+            <IconChat size={15} /><span>Chat</span>
           </button>
-          <button className={`cm-pill ${workMode === "code" ? "on" : ""}`} onClick={() => requireAuth(() => switchWorkMode("code"))}>
-            <IconTerminal size={14} /> Agent
+          <button className={`cm-pill ${workMode === "code" ? "on" : ""}`} onClick={() => requireAuth(() => switchWorkMode("code"))} title="Agent" aria-label="Agent">
+            <IconTerminal size={15} /><span>Agent</span>
           </button>
         </div>
-        {workMode === "code" && mode === "local" && (
-          <button
-            className={`tool-btn ${planOn ? "active" : ""}`}
-            onClick={() => setPlanOn((p) => !p)}
-            title="Analyze the workload and assign the best specialist models"
-          >
-            <IconRoute size={15} /> Plan
-          </button>
-        )}
         <div className="spacer" />
         {workMode === "code" && <div className="model-controls">
           <div className="model-picker" style={{ position: "relative" }}>
@@ -2275,6 +2283,7 @@ export default function Home() {
               {override === "auto" ? <IconRoute size={14} /> : <BrandMark brand={brandFor(findModel(mode, override)?.engine ?? override)} size={14} />}
               <span className="picker-name-full">{override === "auto" ? "Auto" : findModel(mode, override)?.label ?? "Model"}</span>
               <span className="picker-name-short">{override === "auto" ? "Auto" : shortModelLabel(findModel(mode, override)?.label ?? "Model")}</span>
+              <span className="picker-effort">{effortName(effort)}</span>
               <IconChevron size={13} className="chev" />
             </button>
             {showModels && (
@@ -2284,6 +2293,8 @@ export default function Home() {
                   models={menuModels(mode)}
                   value={override}
                   enabled={modelPool[mode]}
+                  effort={effort}
+                  onEffort={setEffort}
                   onClose={() => setShowModels(false)}
                   onPick={(id) => {
                     setOverride(id);
@@ -2883,47 +2894,56 @@ function ModelMenu({
   models,
   value,
   enabled,
+  effort,
+  onEffort,
   onPick,
   onClose,
 }: {
   models: MenuModel[];
   value: string;
   enabled: string[];
+  effort: Effort;
+  onEffort: (effort: Effort) => void;
   onPick: (id: string) => void;
   onClose: () => void;
 }) {
   const [showMore, setShowMore] = useState(false);
+  const [effortOpen, setEffortOpen] = useState(false);
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (showMore) setShowMore(false);
+      else if (effortOpen) setEffortOpen(false);
       else onClose();
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [showMore, onClose]);
+  }, [showMore, effortOpen, onClose]);
   const preferredIds = ["gpt-5.6-sol", "claude-opus", "gpt-5.6-terra", "claude-sonnet"];
   let featured = preferredIds.map((id) => models.find((model) => model.id === id)).filter((model): model is MenuModel => !!model);
   if (!featured.length) featured = models.slice(0, 4);
   const forced = value !== "auto" ? models.find((model) => model.id === value) : undefined;
   if (forced && !featured.some((model) => model.id === forced.id)) featured = [forced, ...featured.slice(0, 3)];
   const moreModels = models.filter((model) => !featured.some((featuredModel) => featuredModel.id === model.id));
+  const modelRow = (id: string, icon: React.ReactNode, label: string) => (
+    <button key={id} className={`simple-model-row ${value === id ? "selected" : ""}`} onClick={() => onPick(id)}>
+      <span className="simple-model-icon">{icon}</span>
+      <span className="simple-model-copy"><strong>{label}</strong>{MODEL_TAGLINE[id] && <small>{MODEL_TAGLINE[id]}</small>}</span>
+      {value === id && <IconCheck size={15} />}
+    </button>
+  );
   return (
     <div className="menu simple-model-menu" onMouseLeave={() => setShowMore(false)}>
       <div className="menu-mobile-head"><span /><strong>Models</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
       <div className="simple-menu-title">Models</div>
-      <button className={`simple-model-row ${value === "auto" ? "selected" : ""}`} onClick={() => onPick("auto")}>
-        <span className="simple-model-icon"><IconRoute size={16} /></span>
-        <strong>Auto</strong>
-        {value === "auto" && <IconCheck size={15} />}
+      {modelRow("auto", <IconRoute size={16} />, "Auto")}
+      {featured.map((m) => modelRow(m.id, <BrandMark brand={brandFor(m.engine)} size={16} />, m.label))}
+      {/* Effort lives inside the model menu on mobile (Claude-style); on desktop
+          it stays a separate slider popover, so this row is hidden there. */}
+      <div className="menu-divider effort-divider" />
+      <button className="menu-drill effort-drill" onClick={() => setEffortOpen(true)}>
+        <span>Effort</span><strong>{effortName(effort)}</strong><IconChevron size={14} />
       </button>
-      {featured.map((m) => (
-        <button key={m.id} className={`simple-model-row ${value === m.id ? "selected" : ""}`} onClick={() => onPick(m.id)}>
-          <span className="simple-model-icon"><BrandMark brand={brandFor(m.engine)} size={16} /></span>
-          <strong>{m.label}</strong>
-          {value === m.id && <IconCheck size={15} />}
-        </button>
-      ))}
       <div className="menu-divider" />
       <button
         className={`menu-drill ${showMore ? "active" : ""}`}
@@ -2937,13 +2957,20 @@ function ModelMenu({
         <div className="menu-subpanel simple-model-submenu" onMouseEnter={() => setShowMore(true)}>
           <div className="subpanel-mobile-head"><button onClick={() => setShowMore(false)} aria-label="Back"><IconChevron size={16} /></button><strong>More models</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
           <div className="simple-menu-title">More models <small>{enabled.length} in Auto</small></div>
-          {(moreModels.length ? moreModels : models).map((m) => (
-            <button key={m.id} className={`simple-model-row ${value === m.id ? "selected" : ""}`} onClick={() => onPick(m.id)}>
-              <span className="simple-model-icon"><BrandMark brand={brandFor(m.engine)} size={16} /></span>
-              <strong>{m.label}</strong>
-              {value === m.id && <IconCheck size={15} />}
+          {(moreModels.length ? moreModels : models).map((m) => modelRow(m.id, <BrandMark brand={brandFor(m.engine)} size={16} />, m.label))}
+        </div>
+      )}
+      {effortOpen && (
+        <div className="menu-subpanel effort-subpanel">
+          <div className="subpanel-mobile-head"><button onClick={() => setEffortOpen(false)} aria-label="Back"><IconChevron size={16} /></button><strong>Effort</strong><button onClick={onClose} aria-label="Close"><IconX size={18} /></button></div>
+          <div className="simple-menu-title">Effort</div>
+          {EFFORT_LEVELS.map((level) => (
+            <button key={level} className={`simple-model-row ${effort === level ? "selected" : ""}`} onClick={() => { onEffort(level); setEffortOpen(false); }}>
+              <span className="simple-model-copy"><strong>{effortName(level)}{level === "high" && <em className="effort-default">Default</em>}</strong><small>{EFFORT_DESC[level]}</small></span>
+              {effort === level && <IconCheck size={15} />}
             </button>
           ))}
+          <p className="effort-note">Higher effort means more thorough responses, but takes longer and uses your limits faster.</p>
         </div>
       )}
     </div>
@@ -2952,6 +2979,23 @@ function ModelMenu({
 
 const EFFORT_LEVELS: Effort[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
 const effortName = (level: Effort) => level === "xhigh" ? "Extra" : level[0].toUpperCase() + level.slice(1);
+// Short descriptions for the mobile effort list (Claude-style text options).
+const EFFORT_DESC: Record<Effort, string> = {
+  low: "Quick replies to simple questions",
+  medium: "Light, casual tasks",
+  high: "Balanced for everyday work",
+  xhigh: "Complex, detailed work",
+  max: "The hardest problems, takes longer",
+  ultra: "Maximum depth. Slowest.",
+};
+// Short taglines shown under the featured models in the mobile picker.
+const MODEL_TAGLINE: Record<string, string> = {
+  auto: "Routes each task to the best model",
+  "gpt-5.6-sol": "For your toughest challenges",
+  "claude-opus": "For complex, high-stakes work",
+  "gpt-5.6-terra": "Efficient for everyday tasks",
+  "claude-sonnet": "Balanced for everyday work",
+};
 
 function EffortMenu({ value, onPick, onClose }: { value: Effort; onPick: (effort: Effort) => void; onClose: () => void }) {
   const index = EFFORT_LEVELS.indexOf(value);
