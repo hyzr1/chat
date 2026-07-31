@@ -174,6 +174,123 @@ export function capabilityProfile(id: string): CapabilityProfile {
   return MODEL_CAPABILITIES[id] ?? { strengths: ["new_code"], bestFor: "General-purpose work." };
 }
 
+// ── Subscription usage weight ────────────────────────────────────────────────
+// How much of a plan's quota one token on this model consumes, relative to a mid
+// model (1.0). Premium/frontier models (Fable, Sol) drain far more than cheap
+// ones (Sonnet, Luna) even at equal token counts. Quality-aware routing uses
+// this — not raw token count — to break ties toward the least subscription drain.
+export const PLAN_USAGE_WEIGHT: Record<string, number> = {
+  "claude-haiku": 0.33, "claude-sonnet": 1.0, "claude-sonnet-4-6": 0.9,
+  "claude-opus": 3.5, "claude-opus-4-7": 3.3, "claude-opus-4-6": 3.2, "claude-opus-3": 4.5, "claude-fable": 8.0,
+  "gpt-5.4-mini": 0.4, "gpt-5.6-luna": 0.1, "gpt-5.4": 2.5, "gpt-5.6-terra": 1.0, "gpt-5.5": 8.0, "gpt-5.6-sol": 10.0,
+};
+export function planUsageWeight(id: string): number { return PLAN_USAGE_WEIGHT[id] ?? 1; }
+
+// Output-weighted API price weight (coding output tokens dominate). Lower =
+// cheaper. Used only as a final tiebreak in routing. Unknown sorts last.
+export const LOCAL_MODEL_PRICING: Record<string, { in: number; out: number }> = {
+  "claude-haiku": { in: 1, out: 5 }, "claude-sonnet": { in: 3, out: 15 }, "claude-opus": { in: 5, out: 25 },
+  "claude-fable": { in: 10, out: 50 }, "claude-opus-4-7": { in: 5, out: 25 }, "claude-opus-4-6": { in: 5, out: 25 },
+  "claude-opus-3": { in: 15, out: 75 }, "claude-sonnet-4-6": { in: 3, out: 15 },
+  "gpt-5.6-sol": { in: 5, out: 20 }, "gpt-5.5": { in: 5, out: 20 }, "gpt-5.6-terra": { in: 2, out: 8 },
+  "gpt-5.4": { in: 1.5, out: 6 }, "gpt-5.6-luna": { in: 0.5, out: 2 }, "gpt-5.4-mini": { in: 0.2, out: 0.8 },
+};
+export function modelCostWeight(id: string): number {
+  const p = LOCAL_MODEL_PRICING[id];
+  return p ? p.in * 0.25 + p.out * 0.75 : Number.POSITIVE_INFINITY;
+}
+
+// ── Capability × model QUALITY matrix ───────────────────────────────────────
+// Scores HOW GOOD each model is at each capability, 0–10 (not just can-it). The
+// router routes to the model that clears a per-subtask quality bar at the lowest
+// plan usage — premium models kept where they earn their cost (design, hard
+// algorithms, debugging), never wasted on commodity work (plain CRUD, edits).
+export const MODEL_BASE_QUALITY: Record<string, number> = {
+  "claude-fable": 9.6, "claude-opus": 9.2, "claude-opus-4-7": 8.9, "claude-opus-4-6": 8.7,
+  "claude-sonnet": 8.5, "claude-sonnet-4-6": 8.2, "claude-opus-3": 7.8, "claude-haiku": 7.0,
+  "gpt-5.6-sol": 9.6, "gpt-5.5": 9.0, "gpt-5.6-terra": 8.6, "gpt-5.4": 8.0,
+  "gpt-5.6-luna": 7.4, "gpt-5.4-mini": 6.6,
+};
+
+export const CAPABILITY_QUALITY_ADJUST: Partial<Record<TaskCapability, Record<string, number>>> = {
+  frontend_design: { "claude-fable": 0.4, "claude-opus": 0.3, "gpt-5.6-sol": 0.2, "claude-sonnet": 0.2, "gpt-5.6-terra": 0.1, "gpt-5.6-luna": -0.4, "claude-haiku": -0.6, "gpt-5.4-mini": -1.8 },
+  architecture: { "gpt-5.6-sol": 0.4, "claude-opus": 0.4, "claude-fable": 0.3, "gpt-5.5": 0.3, "claude-sonnet": -0.2, "gpt-5.6-luna": -0.8, "claude-haiku": -1.4, "gpt-5.4-mini": -1.8 },
+  debugging: { "claude-fable": 0.4, "claude-sonnet": 0.3, "gpt-5.6-sol": 0.2, "claude-haiku": 0.0, "gpt-5.4-mini": -1.2 },
+  code_review: { "claude-fable": 0.4, "claude-opus": 0.3, "claude-sonnet": 0.2, "gpt-5.6-sol": 0.1, "gpt-5.4-mini": -1.0 },
+  long_horizon: { "claude-fable": 0.4, "gpt-5.6-sol": 0.3, "claude-opus": 0.3, "claude-sonnet": 0.2, "gpt-5.6-luna": -0.5, "gpt-5.4-mini": -2.0 },
+  science: { "gpt-5.6-sol": 0.5, "gpt-5.5": 0.4, "gpt-5.4": 0.2, "claude-fable": 0.2, "gpt-5.6-luna": -0.6, "gpt-5.4-mini": -1.5, "claude-haiku": -1.0 },
+  data_analysis: { "gpt-5.6-sol": 0.4, "gpt-5.5": 0.4, "gpt-5.4": 0.3, "gpt-5.6-luna": 0.1, "claude-haiku": -0.8, "gpt-5.4-mini": -1.2 },
+  cybersecurity: { "gpt-5.6-sol": 0.4, "gpt-5.6-terra": 0.3, "gpt-5.5": 0.3, "claude-fable": -0.3, "claude-opus": -0.3, "claude-sonnet": -0.3, "claude-haiku": -0.5 },
+  vision: { "claude-fable": 0.3, "claude-opus": 0.3, "claude-sonnet": 0.2, "gpt-5.6-sol": 0.2, "gpt-5.4-mini": -1.0 },
+  creative_ideation: { "claude-fable": 0.4, "claude-opus": 0.4, "claude-opus-3": 0.3, "claude-sonnet": 0.2, "claude-haiku": 0.1, "gpt-5.4-mini": -1.0 },
+  conversation: { "claude-fable": 0.4, "claude-opus": 0.4, "claude-sonnet": 0.2, "claude-haiku": 0.2, "gpt-5.4-mini": -0.6 },
+  new_code: { "gpt-5.6-terra": 0.6, "gpt-5.6-luna": 0.8, "claude-sonnet": 0.6, "gpt-5.4": 0.5, "gpt-5.6-sol": -0.2, "claude-fable": -0.3, "claude-opus": -0.2, "gpt-5.4-mini": -0.4 },
+  fast_high_volume: { "gpt-5.6-luna": 1.0, "gpt-5.4-mini": 0.9, "claude-haiku": 0.9, "gpt-5.6-terra": 0.3, "gpt-5.6-sol": -0.6, "claude-fable": -0.8, "claude-opus": -0.7 },
+  organization: { "gpt-5.4-mini": 0.6, "gpt-5.6-luna": 0.5, "gpt-5.6-terra": 0.4, "claude-haiku": 0.4, "gpt-5.6-sol": -0.4, "claude-fable": -0.4 },
+  documents: { "gpt-5.6-terra": 0.3, "gpt-5.6-luna": 0.3, "gpt-5.6-sol": 0.2, "claude-fable": 0.2, "gpt-5.4-mini": -0.8 },
+  research_search: { "gpt-5.6-sol": 0.3, "gpt-5.6-terra": 0.3, "gpt-5.6-luna": 0.3, "gpt-5.5": 0.2, "gpt-5.4-mini": -0.6 },
+  computer_use: { "gpt-5.6-sol": 0.3, "claude-sonnet": 0.3, "gpt-5.6-terra": 0.2, "gpt-5.4-mini": 0.1, "claude-fable": -0.2 },
+  media_generation: { "gpt-5.6-luna": 0.8, "gpt-5.6-terra": 0.8, "gpt-5.6-sol": 0.6, "gpt-5.5": 0.4, "gpt-5.4": 0.2, "gpt-5.4-mini": -1.5 },
+};
+
+export function capabilityQuality(id: string, capability: TaskCapability): number {
+  const model = LOCAL_MODELS[id];
+  if (!model) return 0;
+  if (capability === "media_generation" && model.engine === "claude") return 0;
+  const base = MODEL_BASE_QUALITY[id] ?? 6.0;
+  const adj = CAPABILITY_QUALITY_ADJUST[capability]?.[id] ?? 0;
+  return Math.max(0, Math.min(10, base + adj));
+}
+
+// ── Fine-grained SKILL affinity ─────────────────────────────────────────────
+// Skills detected from the prompt refine the broad capability score toward the
+// model genuinely best at that specific skill (C++→Sol, CSS→Fable, CLI→Luna).
+export type Skill =
+  | "cpp" | "rust" | "go" | "python" | "typescript" | "csharp" | "java" | "sql"
+  | "css" | "animation" | "graphics" | "api_backend" | "cli" | "image_gen"
+  | "video_gen" | "regex" | "testing_debug" | "data_ml" | "systems_perf";
+
+export const SKILL_LABELS: Record<Skill, string> = {
+  cpp: "C/C++", rust: "Rust", go: "Go", python: "Python", typescript: "TypeScript/JS",
+  csharp: "C#/.NET", java: "Java/JVM", sql: "SQL/databases", css: "CSS/styling",
+  animation: "Animation & motion", graphics: "Graphics/WebGL/shaders", api_backend: "APIs & backend",
+  cli: "Command line & scripting", image_gen: "Image generation", video_gen: "Video generation",
+  regex: "Regex", testing_debug: "Testing & debugging", data_ml: "Data & ML", systems_perf: "Systems & performance",
+};
+
+export const SKILL_AFFINITY: Partial<Record<Skill, Record<string, number>>> = {
+  cpp: { "gpt-5.6-sol": 0.7, "gpt-5.5": 0.6, "gpt-5.6-terra": 0.3, "claude-fable": 0.2, "claude-sonnet": -0.2, "claude-haiku": -0.6, "gpt-5.4-mini": -0.8 },
+  rust: { "gpt-5.6-sol": 0.6, "gpt-5.5": 0.5, "claude-fable": 0.3, "gpt-5.6-terra": 0.2, "claude-haiku": -0.5 },
+  go: { "gpt-5.6-sol": 0.4, "gpt-5.6-terra": 0.3, "claude-sonnet": 0.2, "claude-fable": 0.2 },
+  python: { "gpt-5.6-sol": 0.4, "claude-fable": 0.3, "gpt-5.5": 0.3, "claude-sonnet": 0.2, "gpt-5.6-terra": 0.2 },
+  typescript: { "claude-fable": 0.4, "claude-sonnet": 0.4, "gpt-5.6-sol": 0.2, "gpt-5.6-terra": 0.2, "claude-opus": 0.2 },
+  csharp: { "gpt-5.6-sol": 0.4, "gpt-5.5": 0.3, "gpt-5.6-terra": 0.2, "claude-fable": 0.1 },
+  java: { "gpt-5.6-sol": 0.4, "gpt-5.5": 0.3, "claude-fable": 0.2, "gpt-5.6-terra": 0.2 },
+  sql: { "gpt-5.6-sol": 0.3, "gpt-5.6-terra": 0.2, "gpt-5.4": 0.2, "claude-sonnet": 0.1 },
+  css: { "claude-fable": 0.5, "claude-opus": 0.4, "claude-sonnet": 0.3, "gpt-5.6-sol": 0.2, "gpt-5.6-terra": 0.1, "gpt-5.6-luna": -0.2, "gpt-5.4-mini": -0.6 },
+  animation: { "claude-fable": 0.4, "gpt-5.6-sol": 0.3, "claude-opus": 0.3, "gpt-5.6-terra": 0.2, "claude-sonnet": 0.2, "gpt-5.4-mini": -0.5 },
+  graphics: { "gpt-5.6-sol": 0.5, "gpt-5.5": 0.4, "claude-fable": 0.3, "gpt-5.6-terra": 0.2, "claude-haiku": -0.6 },
+  api_backend: { "gpt-5.6-sol": 0.3, "gpt-5.6-terra": 0.3, "gpt-5.6-luna": 0.3, "claude-sonnet": 0.2, "gpt-5.4": 0.2 },
+  cli: { "gpt-5.6-luna": 0.5, "gpt-5.4-mini": 0.5, "claude-haiku": 0.4, "gpt-5.6-terra": 0.3, "gpt-5.6-sol": -0.2, "claude-fable": -0.4 },
+  image_gen: { "gpt-5.6-luna": 0.7, "gpt-5.6-terra": 0.6, "gpt-5.6-sol": 0.5, "gpt-5.5": 0.4, "gpt-5.4": 0.2 },
+  video_gen: { "gpt-5.6-sol": 0.5, "gpt-5.6-terra": 0.5, "gpt-5.6-luna": 0.4, "gpt-5.5": 0.3 },
+  regex: { "gpt-5.6-sol": 0.3, "claude-sonnet": 0.3, "gpt-5.6-terra": 0.2, "claude-fable": 0.2 },
+  testing_debug: { "claude-fable": 0.5, "claude-sonnet": 0.4, "gpt-5.6-sol": 0.2, "claude-haiku": 0.1, "gpt-5.4-mini": -0.8 },
+  data_ml: { "gpt-5.6-sol": 0.5, "gpt-5.5": 0.4, "gpt-5.4": 0.3, "gpt-5.6-luna": 0.1, "gpt-5.4-mini": -0.6 },
+  systems_perf: { "gpt-5.6-sol": 0.5, "gpt-5.5": 0.4, "claude-fable": 0.3, "gpt-5.6-terra": 0.2, "gpt-5.4-mini": -1.0 },
+};
+
+export function skillQuality(id: string, capability: TaskCapability, skills?: Skill[]): number {
+  const model = LOCAL_MODELS[id];
+  if (!model) return 0;
+  if (skills?.some((s) => s === "image_gen" || s === "video_gen") && model.engine === "claude") return 0;
+  const base = capabilityQuality(id, capability);
+  if (!skills?.length) return base;
+  const deltas = skills.map((s) => SKILL_AFFINITY[s]?.[id] ?? 0);
+  const skillAdj = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+  return Math.max(0, Math.min(10, base + skillAdj));
+}
+
 const COMMON_EFFORTS: Effort[] = ["low", "medium", "high", "xhigh"];
 export function supportedEfforts(model: LocalModel): Effort[] {
   if (model.engine === "claude") return [...COMMON_EFFORTS, "max"];

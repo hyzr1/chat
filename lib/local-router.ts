@@ -1,10 +1,15 @@
-// Fast deterministic fallback used when the model planner is disabled. Unlike
-// the old difficulty ladder, this identifies the workload and ranks models by
-// task-specific strengths. The model planner remains the richer default.
+// Quality-first deterministic router. Identifies the workload (capability +
+// fine-grained skills + how much quality the user is demanding + true
+// difficulty) and routes to the model that clears that subtask's quality bar at
+// the LOWEST subscription usage. Quality is the gate; usage is only the tiebreak
+// among genuine equals. Mirrors vmx-engine/src/local-router.ts.
 
-import { CAPABILITY_LABELS, LOCAL_MODELS, LOCAL_TIER_DEFAULT, capabilityProfile, type LocalModel, type TaskCapability, type Tier } from "./local-models";
+import { CAPABILITY_LABELS, LOCAL_MODELS, LOCAL_TIER_DEFAULT, capabilityQuality, skillQuality, modelCostWeight, planUsageWeight, type LocalModel, type Skill, type TaskCapability, type Tier } from "./local-models";
 import { rankModelsFromSamples, type RoutingFeedbackSample } from "./routing-feedback";
 import { productEnv } from "./product";
+
+export type CostBias = "cheap" | "balanced" | "quality";
+export interface CostOptions { ceilingId?: string; bias?: CostBias; demand?: number; skills?: Skill[] }
 
 export interface LocalRouteDecision {
   model: LocalModel;
@@ -24,32 +29,32 @@ export interface RoutingDecisionTrace {
   capability: TaskCapability;
   tier: Tier;
   providerPreference: ProviderPreference;
-  source: "default" | "adaptive" | "custom" | "provider" | "fallback";
+  source: "default" | "adaptive" | "custom" | "provider" | "fallback" | "cost";
   adapted: boolean;
   sampleCount: number;
   reason: string;
   candidates: Array<{ modelId: string; attempts: number; successRate: number | null; averageTokens: number | null; score: number | null }>;
 }
-export const DEFAULT_CAPABILITY_ORDER: Record<TaskCapability, string[]> = {
-  frontend_design: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "claude-sonnet", "claude-fable"],
-  new_code: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "claude-sonnet", "claude-fable"],
-  debugging: ["claude-haiku", "claude-sonnet", "claude-fable", "gpt-5.6-terra", "gpt-5.6-sol"],
-  code_review: ["claude-haiku", "claude-sonnet", "claude-fable", "gpt-5.6-terra", "claude-opus"],
-  architecture: ["gpt-5.4-mini", "gpt-5.6-terra", "claude-fable", "gpt-5.6-sol", "claude-opus"],
-  long_horizon: ["claude-haiku", "claude-sonnet", "claude-fable", "gpt-5.6-sol", "claude-opus"],
-  research_search: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "claude-sonnet", "claude-fable"],
-  computer_use: ["gpt-5.4-mini", "claude-sonnet", "gpt-5.6-sol", "gpt-5.6-terra", "claude-sonnet-4-6"],
-  vision: ["claude-haiku", "claude-sonnet", "claude-fable", "gpt-5.6-sol", "claude-opus"],
-  media_generation: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.5", "gpt-5.4"],
-  data_analysis: ["gpt-5.6-luna", "gpt-5.4", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.5"],
-  documents: ["gpt-5.6-luna", "gpt-5.6-terra", "claude-fable", "gpt-5.6-sol", "claude-opus"],
-  organization: ["gpt-5.4-mini", "gpt-5.6-terra", "claude-fable", "gpt-5.6-luna", "claude-sonnet"],
-  conversation: ["claude-haiku", "claude-sonnet", "claude-fable", "gpt-5.6-terra", "claude-opus"],
-  creative_ideation: ["claude-haiku", "claude-sonnet", "claude-fable", "gpt-5.6-terra", "claude-opus"],
-  cybersecurity: ["gpt-5.4-mini", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.5", "claude-opus"],
-  science: ["gpt-5.4-mini", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.5", "claude-opus"],
-  fast_high_volume: ["gpt-5.4-mini", "gpt-5.6-luna", "gpt-5.6-terra", "claude-haiku"],
-};
+
+// The core pool the deterministic router ranks over (legacy/duplicate models are
+// still routable by explicit override, just not part of the default ordering).
+const CORE_MODELS = [
+  "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
+  "claude-fable", "claude-opus", "claude-sonnet", "claude-haiku",
+];
+
+// Per-capability preference order, GENERATED from the quality matrix: best model
+// at that capability first, ties broken by lower subscription usage. One source
+// of truth for the routing-rules defaults, the planner catalog and this router.
+export const DEFAULT_CAPABILITY_ORDER: Record<TaskCapability, string[]> = Object.fromEntries(
+  (Object.keys(CAPABILITY_LABELS) as TaskCapability[]).map((capability) => {
+    const ranked = CORE_MODELS
+      .filter((id) => capabilityQuality(id, capability) > 0)
+      .sort((a, b) => capabilityQuality(b, capability) - capabilityQuality(a, capability) || planUsageWeight(a) - planUsageWeight(b));
+    return [capability, ranked];
+  }),
+) as Record<TaskCapability, string[]>;
+
 export const DEFAULT_ROUTING_RULES: Record<TaskCapability, RoutingRule> = Object.fromEntries(
   Object.entries(DEFAULT_CAPABILITY_ORDER).map(([capability, models]) => [capability, { primary: models.slice(0, 3), fallbacks: models.slice(3) }]),
 ) as Record<TaskCapability, RoutingRule>;
@@ -65,47 +70,78 @@ export function inferProviderPreference(prompt: string): ProviderPreference {
   return "auto";
 }
 
-const ROLE_DEFAULTS: Record<ProviderPreference, Record<Tier, string>> = {
-  claude: { trivial: "claude-haiku", standard: "claude-opus", hard: "claude-fable" },
-  codex: { trivial: "gpt-5.6-luna", standard: "gpt-5.6-terra", hard: "gpt-5.6-sol" },
-  auto: { trivial: "gpt-5.4-mini", standard: "gpt-5.6-terra", hard: "gpt-5.6-sol" },
-};
+const QUALITY_CUES = /\b(high[- ]?end|premium|polished|beautiful|stunning|gorgeous|world[- ]?class|production[- ]?grade|pixel[- ]?perfect|top[- ]?(?:tier|quality)|best (?:possible|in class)|impress|portfolio|award|really (?:important|matters)|mission[- ]?critical|critical|complex|complicated|tricky|intricate|subtle|hard(?:est)? (?:bug|problem)|can'?t (?:figure|solve|crack)|stuck on|thorough(?:ly)?|robust|enterprise|sophisticated|elegant|meticulous|no expense)\b/i;
+const SIMPLE_CUES = /\b(basic|simple|quick|minimal|rough|prototype|proto|mvp|throwaway|placeholder|draft|boilerplate|scaffold|bare[- ]?bones|barebones|just a|nothing fancy|doesn'?t (?:need|have) to be (?:fancy|pretty|perfect|good)|no need for|dead simple|trivial|small tweak|one[- ]?liner)\b/i;
+// The user's own framing raises or lowers the quality bar (< 1 tightens → keep
+// the specialist; > 1 loosens → a cheap model is the right call).
+export function classifyQualityDemand(prompt: string): number {
+  const text = prompt.toLowerCase();
+  let demand = 1;
+  const qualityHits = (text.match(new RegExp(QUALITY_CUES, "gi")) ?? []).length;
+  const simpleHits = (text.match(new RegExp(SIMPLE_CUES, "gi")) ?? []).length;
+  if (qualityHits) demand *= qualityHits >= 2 ? 0.5 : 0.65;
+  if (simpleHits) demand *= simpleHits >= 2 ? 1.7 : 1.45;
+  return Math.max(0.45, Math.min(1.9, demand));
+}
 
-function baselineSelection(capability: TaskCapability, complexity: Tier, enabledModelIds?: string[], routingRules?: RoutingRules, providerPreference: ProviderPreference = "auto") {
+const cheapestOf = (ids: string[]): string | undefined =>
+  ids.length ? ids.reduce((a, b) => (modelCostWeight(b) < modelCostWeight(a) ? b : a)) : undefined;
+
+// How far below the best available quality we accept a cheaper model — narrow by
+// default (quality first), widening only for genuinely-easy work (trivial) or
+// when the user asked for something basic (demand > 1).
+function qualityTolerance(tier: Tier, bias: CostBias): number {
+  const byTier: Record<Tier, number> = { hard: 0.25, standard: 0.7, trivial: 3.5 };
+  const byBias: Record<CostBias, number> = { quality: 0.75, balanced: 1.0, cheap: 1.4 };
+  return byTier[tier] * byBias[bias];
+}
+
+// Pick the model that clears this exact subtask's (skill-refined) quality bar at
+// the lowest subscription usage. Quality is the gate; usage is only the tiebreak.
+function qualityAwareSelect(pool: string[], capability: TaskCapability, tier: Tier, bias: CostBias, skills?: Skill[], demand = 1): string {
+  if (!pool.length) return LOCAL_TIER_DEFAULT[tier];
+  const scored = pool.map((id) => ({ id, q: skillQuality(id, capability, skills), w: planUsageWeight(id), c: modelCostWeight(id) }));
+  const qmax = Math.max(...scored.map((s) => s.q));
+  const tol = qualityTolerance(tier, bias) * demand;
+  const eligible = scored.filter((s) => s.q >= qmax - tol);
+  eligible.sort((a, b) => a.w - b.w || b.q - a.q || a.c - b.c);
+  return eligible[0]?.id ?? pool[0];
+}
+
+function baselineSelection(capability: TaskCapability, complexity: Tier, enabledModelIds?: string[], routingRules?: RoutingRules, providerPreference: ProviderPreference = "auto", cost?: CostOptions) {
   const enabled = (enabledModelIds?.length ? enabledModelIds : Object.keys(LOCAL_MODELS)).filter((id) => LOCAL_MODELS[id]);
   const constrainedProvider: ProviderPreference = capability === "media_generation" ? "codex" : providerPreference;
-  const providerEnabled = constrainedProvider === "auto" ? enabled : enabled.filter((id) => LOCAL_MODELS[id].engine === constrainedProvider);
+  let providerEnabled = constrainedProvider === "auto" ? enabled : enabled.filter((id) => LOCAL_MODELS[id].engine === constrainedProvider);
+  if (!providerEnabled.length) providerEnabled = enabled;
+
+  const ceilingWeight = cost?.ceilingId ? modelCostWeight(cost.ceilingId) : Number.POSITIVE_INFINITY;
+  const capped = providerEnabled.filter((id) => modelCostWeight(id) <= ceilingWeight);
+  const pool = capped.length ? capped : [cheapestOf(providerEnabled)!];
+
   const rule = routingRules?.[capability] ?? DEFAULT_ROUTING_RULES[capability];
-  const ordered = [...(rule.primary ?? []), ...(rule.fallbacks ?? [])].filter((id) => providerEnabled.includes(id));
   const configured = routingRules?.[capability];
   const defaults = DEFAULT_ROUTING_RULES[capability];
   const customPriority = Boolean(configured && JSON.stringify(configured) !== JSON.stringify(defaults));
-  const roleDefault = ROLE_DEFAULTS[constrainedProvider][complexity];
-  if (constrainedProvider !== "auto" && providerEnabled.includes(roleDefault)) return { modelId: roleDefault, ordered, constrainedProvider, customPriority, source: "provider" as const };
-  if (constrainedProvider === "auto") {
-    const preferred = complexity === "hard"
-      ? (["debugging", "code_review", "long_horizon", "vision", "creative_ideation"].includes(capability) ? "claude-fable" : "gpt-5.6-sol")
-      : complexity === "standard"
-        ? (["creative_ideation", "conversation", "documents", "code_review", "vision"].includes(capability) ? "claude-opus" : "gpt-5.6-terra")
-        : (["conversation", "organization"].includes(capability) ? "claude-haiku" : capability === "new_code" ? "gpt-5.6-luna" : "gpt-5.4-mini");
-    if (providerEnabled.includes(preferred)) return { modelId: preferred, ordered, constrainedProvider, customPriority, source: customPriority ? "custom" as const : "default" as const };
+  const ordered = [...(rule.primary ?? []), ...(rule.fallbacks ?? [])].filter((id) => pool.includes(id));
+  const bias: CostBias = cost?.bias ?? "quality";
+
+  if (customPriority) {
+    return { modelId: ordered[0] ?? cheapestOf(pool)!, ordered, constrainedProvider, customPriority, source: "custom" as const };
   }
-  const tierPreference: Tier[] = complexity === "trivial" ? ["trivial", "standard", "hard"] : complexity === "hard" ? ["hard", "standard", "trivial"] : ["standard", "trivial", "hard"];
-  for (const tier of tierPreference) {
-    const match = ordered.find((id) => LOCAL_MODELS[id]?.tier === tier);
-    if (match) return { modelId: match, ordered, constrainedProvider, customPriority, source: customPriority ? "custom" as const : "fallback" as const };
-  }
-  return { modelId: providerEnabled.find((id) => capabilityProfile(id).strengths.includes(capability)) ?? providerEnabled[0] ?? enabled[0] ?? LOCAL_TIER_DEFAULT[complexity], ordered, constrainedProvider, customPriority, source: "fallback" as const };
+
+  const modelId = qualityAwareSelect(pool, capability, complexity, bias, cost?.skills, cost?.demand);
+  const source: "provider" | "cost" | "default" = constrainedProvider !== "auto" ? "provider" : bias === "quality" ? "default" : "cost";
+  return { modelId, ordered, constrainedProvider, customPriority, source };
 }
 
-export function selectRoutedModelWithTrace(capability: TaskCapability, complexity: Tier, enabledModelIds?: string[], routingRules?: RoutingRules, providerPreference: ProviderPreference = "auto", adaptiveSamples: RoutingFeedbackSample[] = []) {
-  const baseline = baselineSelection(capability, complexity, enabledModelIds, routingRules, providerPreference);
+export function selectRoutedModelWithTrace(capability: TaskCapability, complexity: Tier, enabledModelIds?: string[], routingRules?: RoutingRules, providerPreference: ProviderPreference = "auto", adaptiveSamples: RoutingFeedbackSample[] = [], cost?: CostOptions) {
+  const baseline = baselineSelection(capability, complexity, enabledModelIds, routingRules, providerPreference, cost);
   let modelId = baseline.modelId;
   let source: RoutingDecisionTrace["source"] = baseline.source;
   let adapted = false;
   let sampleCount = 0;
   let candidates: RoutingDecisionTrace["candidates"] = baseline.ordered.map((candidate) => ({ modelId: candidate, attempts: 0, successRate: null, averageTokens: null, score: null }));
-  if (adaptiveSamples.length && !baseline.customPriority && productEnv("HYZR_CHAT_DISABLE_ADAPTIVE_ROUTING", "VMX_DISABLE_ADAPTIVE_ROUTING") !== "1") {
+  if (cost?.bias !== "cheap" && adaptiveSamples.length && !baseline.customPriority && productEnv("HYZR_CHAT_DISABLE_ADAPTIVE_ROUTING", "VMX_DISABLE_ADAPTIVE_ROUTING") !== "1") {
     const sameTier = baseline.ordered.filter((id) => LOCAL_MODELS[id]?.tier === complexity);
     if (sameTier.length >= 2) {
       const learned = rankModelsFromSamples(sameTier, capability, complexity, adaptiveSamples);
@@ -125,33 +161,64 @@ export function selectRoutedModelWithTrace(capability: TaskCapability, complexit
     sampleCount,
     reason: adapted
       ? `${modelId} replaced ${baseline.modelId} after ${sampleCount} comparable rated outcomes cleared the confidence threshold.`
-      : baseline.customPriority
+      : source === "cost"
+        ? `Quality-matched at the lowest subscription usage for this ${capability} workload.`
+        : baseline.customPriority
         ? `Selected from the user's explicit ${capability} priority order; adaptive overrides are disabled for customized routes.`
         : baseline.constrainedProvider !== "auto"
-          ? `Honored the ${baseline.constrainedProvider === "codex" ? "ChatGPT" : "Claude"} provider constraint before cost and quality ranking.`
+          ? `Honored the ${baseline.constrainedProvider === "codex" ? "ChatGPT" : "Claude"} provider constraint, then matched quality at the lowest usage.`
           : sampleCount
             ? `Kept ${baseline.modelId}; ${sampleCount} comparable outcomes did not justify an evidence-backed override.`
-            : `Selected the capability and complexity default; outcome evidence is not yet sufficient to adapt this route.`,
+            : `Best quality for this ${capability} workload at the lowest subscription usage.`,
     candidates,
   };
   return { modelId, trace };
 }
 
-export function selectRoutedModel(capability: TaskCapability, complexity: Tier, enabledModelIds?: string[], routingRules?: RoutingRules, providerPreference: ProviderPreference = "auto", adaptiveSamples: RoutingFeedbackSample[] = []): string {
-  return selectRoutedModelWithTrace(capability, complexity, enabledModelIds, routingRules, providerPreference, adaptiveSamples).modelId;
+export function selectRoutedModel(capability: TaskCapability, complexity: Tier, enabledModelIds?: string[], routingRules?: RoutingRules, providerPreference: ProviderPreference = "auto", adaptiveSamples: RoutingFeedbackSample[] = [], cost?: CostOptions): string {
+  return selectRoutedModelWithTrace(capability, complexity, enabledModelIds, routingRules, providerPreference, adaptiveSamples, cost).modelId;
 }
 
 export function classifyComplexity(prompt: string): Tier {
   const text = prompt.toLowerCase();
-  if (/\b(restart|start|stop|reopen)\b.{0,40}\b(server|dev server|process)\b|\b(check|verify)\b.{0,45}\b(running|server|port|status)\b|\b(rename|typo|format|quick fact|one[- ]line|single command|hello[ ,_-]*world|basic boilerplate|bare html|no styling)\b|\b(simple|basic|small|quick)\b.{0,32}\b(css animation|animation tweak|transition|timing change)\b|\b(adjust|change|fix)\b.{0,30}\b(animation timing|duration|delay|easing)\b/.test(text)) return "trivial";
+  // Small mechanical edits and single actions are trivial REGARDLESS of category
+  // — changing a button's padding is "frontend" but trivial; running one shell
+  // command is "computer use" but trivial. They should never pull a frontier model.
+  if (/\b(restart|start|stop|reopen)\b.{0,40}\b(server|dev server|process)\b|\b(check|verify)\b.{0,45}\b(running|server|port|status)\b|\b(rename|typo|format|quick fact|one[- ]line|single command|hello[ ,_-]*world|basic boilerplate|bare html|no styling)\b|\b(simple|basic|small|quick)\b.{0,32}\b(css animation|animation tweak|transition|timing change)\b|\b(adjust|change|fix|tweak|update|set|increase|decrease|bump)\b.{0,30}\b(animation timing|duration|delay|easing|padding|margin|color|colour|font[- ]?size|spacing|width|height|border|border[- ]?radius|background|opacity|z[- ]?index)\b|\b(run|execute)\b.{0,24}\b(command|script|it|this|npm|build|test)\b|\b(add|insert|remove)\b.{0,20}\b(console\.log|comment|import|log statement)\b|\b(move|rename|delete|copy)\b.{0,20}\b(the |a |this )?(file|folder|function|variable)\b/.test(text)) return "trivial";
   if (/\b(architecture|large codebase|entire project|end[- ]to[- ]end|complex migration|security audit|race condition|distributed|production[- ]grade|autonomous|multi[- ]step)\b/.test(text)) return "hard";
   return "standard";
+}
+
+const SKILL_TESTS: [Skill, RegExp][] = [
+  ["cpp", /\bc\+\+|\bcpp\b|std::|cmake|\bg\+\+\b|\bheader file/i],
+  ["rust", /\brust\b|\bcargo\b|borrow checker|\btokio\b|\bwasm\b/i],
+  ["go", /\bgo(?:lang)?\b|goroutine|\bgin\b/i],
+  ["csharp", /\bc#|\.net\b|asp\.net|\bunity\b|\bxaml\b/i],
+  ["java", /\bjava\b|spring boot|\bjvm\b|\bkotlin\b|\bmaven\b|\bgradle\b/i],
+  ["python", /\bpython\b|\bdjango\b|\bflask\b|\bfastapi\b|\bnumpy\b|\bpandas\b|\bpytorch\b|\.py\b/i],
+  ["typescript", /\btypescript\b|\bjavascript\b|\bjs\b|\bts\b|\.[jt]sx?\b|type[- ]safe|generics|\breact\b|\bvue\b|\bsvelte\b|\bnext\.?js\b|\bnode\b/i],
+  ["sql", /\bsql\b|postgres|mysql|sqlite|\bquery\b|database schema|\bjoin\b|\borm\b|prisma/i],
+  ["graphics", /\bwebgl\b|three\.js|\bcanvas\b|\bshader\b|\bglsl\b|opengl\b|\b3d\b|game (?:engine|loop)|\bpixi\b/i],
+  ["animation", /\banimat|\btransition\b|keyframe|\bgsap\b|framer[- ]?motion|\bmotion\b|\btween\b|\bparallax\b/i],
+  ["css", /\bcss\b|tailwind|flexbox|\bgrid\b|styling|\bpadding\b|\bmargin\b|responsive|\blayout\b|\bstylesheet\b/i],
+  ["api_backend", /\bapi\b|\brest\b|graphql|\bendpoint\b|\bbackend\b|server route|microservice|\bwebhook\b|\bmiddleware\b/i],
+  ["cli", /command[- ]?line|\bcli\b|\bterminal\b|powershell|\bbash\b|\bshell\b|run (?:a |the )?(?:command|script)|\bnpm\b|\bmakefile\b/i],
+  ["video_gen", /\bvideo\b.{0,20}\b(gen|generat|create|make)|animation clip|motion graphic/i],
+  ["image_gen", /\b(image|logo|icon|illustration|artwork|picture|photo|banner|sprite)s?\b.{0,24}\b(gen|generat|create|make|design|produce)|\b(generate|create|make|produce)\b.{0,24}\b(image|logo|icon|illustration|artwork)/i],
+  ["regex", /\bregex|regular expression|\bpattern match/i],
+  ["data_ml", /machine learning|\bml model|neural|training data|\bdataset\b|regression|classifier|\bembedding|\bllm\b/i],
+  ["systems_perf", /\bperformance\b|optimize|\blatency\b|\bmemory\b|concurrency|threading|low[- ]level|systems programming|\bthroughput\b/i],
+  ["testing_debug", /unit test|integration test|test suite|\bdebug|fix (?:the |a )?bug|failing test|edge case|\bstack trace\b/i],
+];
+export function detectSkills(prompt: string): Skill[] {
+  const text = prompt.toLowerCase();
+  return SKILL_TESTS.filter(([, re]) => re.test(text)).map(([s]) => s).slice(0, 4);
 }
 
 export function classifyCapability(prompt: string): { capability: TaskCapability; signals: string[] } {
   const text = prompt.toLowerCase();
   const tests: [TaskCapability, RegExp][] = [
-    ["media_generation", /\b(generate|create|edit|animate)\b.{0,64}\b(image|photo|illustration|video|animation|logo|artwork|background)\b|\b(image|video)\s*(?:generation|gen)\b/],
+    ["media_generation", /\b(generate|create|make|produce|edit|render|design|draw|animate)\b.{0,72}\b(images?|photos?|illustrations?|videos?|animations?|logos?|icons?|artworks?|graphics?|banners?|sprites?|avatars?|backgrounds?|wallpapers?)\b|\b(images?|videos?|logos?|icons?)\s*(?:generation|gen)\b|\b(icon set|hero image|cover art|splash (?:screen|image))\b/],
     ["architecture", /\b(architecture|system design|data model|scalab|distributed|microservice|technical design)\b/],
     ["debugging", /\b(debug|bug|broken|crash|root cause|race condition|doesn['’]?t work|fix this)\b|\b(fix|resolve|investigate)\b.{0,32}\berror\b/],
     ["code_review", /\b(code review|review this|security audit|find issues|check for bugs)\b/],
@@ -173,7 +240,7 @@ export function classifyCapability(prompt: string): { capability: TaskCapability
   return { capability: "new_code", signals: ["General implementation"] };
 }
 
-export function routeLocal(prompt: string, override?: string, enabledModelIds?: string[], routingRules?: RoutingRules, adaptiveSamples: RoutingFeedbackSample[] = []): LocalRouteDecision {
+export function routeLocal(prompt: string, override?: string, enabledModelIds?: string[], routingRules?: RoutingRules, adaptiveSamples: RoutingFeedbackSample[] = [], cost?: CostOptions): LocalRouteDecision {
   if (override && override !== "auto" && LOCAL_MODELS[override]) {
     const model = LOCAL_MODELS[override];
     return { model, tier: model.tier, capability: classifyCapability(prompt).capability, reason: `You selected ${model.label} manually.`, signals: ["Manual override"] };
@@ -182,7 +249,8 @@ export function routeLocal(prompt: string, override?: string, enabledModelIds?: 
   const complexity = classifyComplexity(prompt);
   const providerPreference = inferProviderPreference(prompt);
   const enabledIds = (enabledModelIds?.length ? enabledModelIds : Object.keys(LOCAL_MODELS)).filter((id) => LOCAL_MODELS[id]);
-  const routed = selectRoutedModelWithTrace(capability, complexity, enabledIds, routingRules, providerPreference, adaptiveSamples);
+  const enrichedCost: CostOptions = { ...cost, demand: cost?.demand ?? classifyQualityDemand(prompt), skills: cost?.skills ?? detectSkills(prompt) };
+  const routed = selectRoutedModelWithTrace(capability, complexity, enabledIds, routingRules, providerPreference, adaptiveSamples, enrichedCost);
   const modelId = routed.modelId;
   const model = LOCAL_MODELS[modelId];
   return {
