@@ -36,9 +36,9 @@ That's the whole point of the project: **spend as little of your subscription an
 
 <div align="center">
 
-![Real Hyzr Agent run — one prompt routed to Claude Opus 4.8, built, and scrolled live](docs/hyzr-demo.gif)
+![Real Hyzr Agent run — one prompt routed to Claude Opus 4.8, built and rendered live](docs/hyzr-demo.gif)
 
-<sub>A real run, not a mockup: type a prompt on the home screen → the router explains its choice and picks Claude Opus 4.8 for the design work → the finished page renders live (here, the actual output scrolling through hero, menu, and hours).</sub>
+<sub>A real run, not a mockup: type a prompt on the home screen → the router explains its choice and routes the build to Claude Opus 4.8 → the finished page renders live.</sub>
 
 </div>
 
