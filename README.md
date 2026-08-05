@@ -11,11 +11,16 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white&style=flat-square)
 ![Deployed on Vercel](https://img.shields.io/badge/Vercel-live-000?logo=vercel&logoColor=white&style=flat-square)
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/hyzr-agent-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/hyzr-agent.png">
-  <img alt="Hyzr Chat — the Agent workspace" src="docs/hyzr-agent.png" width="900">
-</picture>
+<table>
+  <tr>
+    <td width="50%"><img alt="Hyzr Chat — Agent workspace (light)" src="docs/hyzr-agent.png"></td>
+    <td width="50%"><img alt="Hyzr Chat — Agent workspace (dark)" src="docs/hyzr-agent-dark.png"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Light</sub></td>
+    <td align="center"><sub>Dark</sub></td>
+  </tr>
+</table>
 
 </div>
 
@@ -31,7 +36,9 @@ That's the whole point of the project: **spend as little of your subscription an
 
 <div align="center">
 
-![How Hyzr routes one prompt into subtasks and assigns the best model to each](docs/how-it-works.gif)
+![Real Hyzr Agent run — one prompt routed to Claude Opus 4.8, built and previewed live](docs/hyzr-demo.gif)
+
+<sub>A real run, not a mockup: one prompt → the router explains its choice and picks Claude Opus 4.8 for the design work → the page builds and renders in a live preview.</sub>
 
 </div>
 
