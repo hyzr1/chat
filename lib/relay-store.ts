@@ -35,6 +35,27 @@ async function redis(command: (string | number)[]): Promise<any> {
   return json.result;
 }
 
+// Several commands over one HTTPS round trip. Each request to Upstash costs a
+// TLS handshake and a JSON encode/decode on our side, and that overhead — not
+// Redis itself — is what shows up as active CPU. Anywhere we previously issued
+// two or three sequential commands, this collapses them into one trip.
+async function pipeline(commands: (string | number)[][]): Promise<any[]> {
+  if (commands.length === 0) return [];
+  if (commands.length === 1) return [await redis(commands[0])];
+  const res = await fetch(`${URL}/pipeline`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify(commands),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Upstash ${res.status}`);
+  const json = (await res.json()) as { result?: unknown; error?: string }[];
+  return json.map((entry) => {
+    if (entry?.error) throw new Error(`Upstash pipeline: ${entry.error}`);
+    return entry?.result;
+  });
+}
+
 export async function kvSet(key: string, value: unknown, ttlSeconds = 0): Promise<void> {
   const payload = JSON.stringify(value);
   if (relayBackedByRedis) {
@@ -62,16 +83,42 @@ export async function kvDel(key: string): Promise<void> {
 
 // Push a job onto a per-agent queue with a bounded TTL.
 export async function queuePush(key: string, value: unknown, ttlSeconds = 3600): Promise<void> {
-  const payload = JSON.stringify(value);
+  return queuePushMany(key, [value], ttlSeconds);
+}
+
+// Append many values at once. RPUSH is variadic, so a batch of streamed events
+// costs a single command instead of one per event, and the TTL refresh rides
+// along in the same pipeline. This is the difference between ~2 round trips per
+// token and ~2 per flush.
+export async function queuePushMany(key: string, values: unknown[], ttlSeconds = 3600): Promise<void> {
+  if (values.length === 0) return;
+  const payloads = values.map((v) => JSON.stringify(v));
   if (relayBackedByRedis) {
-    await redis(["RPUSH", key, payload]);
-    await redis(["EXPIRE", key, ttlSeconds]);
+    await pipeline([
+      ["RPUSH", key, ...payloads],
+      ["EXPIRE", key, ttlSeconds],
+    ]);
     return;
   }
   const list = lists.get(key) ?? { items: [], expiresAt: 0 };
-  list.items.push(payload);
+  list.items.push(...payloads);
   list.expiresAt = now() + ttlSeconds * 1000;
   lists.set(key, list);
+}
+
+// Read several keys in one trip. Used by the result route, which needs both the
+// agent record and the job's owner before it can accept a batch.
+export async function kvGetMany<T = unknown>(keys: string[]): Promise<(T | null)[]> {
+  if (keys.length === 0) return [];
+  if (relayBackedByRedis) {
+    const raw = await pipeline(keys.map((k) => ["GET", k]));
+    return raw.map((r) => (r == null ? null : (JSON.parse(r as string) as T)));
+  }
+  return keys.map((k) => {
+    const entry = kv.get(k);
+    if (!entry || !alive(entry.expiresAt)) return null;
+    return JSON.parse(entry.value) as T;
+  });
 }
 
 // Pop the oldest job (FIFO). Returns null when empty.
@@ -86,15 +133,49 @@ export async function queuePop<T = unknown>(key: string): Promise<T | null> {
   return JSON.parse(raw) as T;
 }
 
-// Read the whole queue without consuming (for a UI to poll results).
-export async function queueRange<T = unknown>(key: string): Promise<T[]> {
+// Blocking pop. Redis parks the connection server-side and answers the instant
+// a job lands, so one HTTPS round trip covers the whole wait window. The old
+// approach — LPOP on a 700 ms timer — spent ~11 round trips per long-poll and
+// billed every one of them as active CPU, which is what pinned this project at
+// the top of the usage report. Blocking here is idle wait, not compute.
+export async function queuePopBlocking<T = unknown>(key: string, timeoutSeconds: number): Promise<T | null> {
   if (relayBackedByRedis) {
-    const raw = (await redis(["LRANGE", key, 0, -1])) as string[] | null;
+    // BLPOP answers [key, value] on success and null when the timeout expires.
+    const raw = (await redis(["BLPOP", key, timeoutSeconds])) as [string, string] | null;
+    if (!raw) return null;
+    return JSON.parse(raw[1]) as T;
+  }
+  // In-process fallback keeps the local dev path working without Upstash.
+  const deadline = now() + timeoutSeconds * 1000;
+  for (;;) {
+    const popped = await queuePop<T>(key);
+    if (popped !== null) return popped;
+    if (now() >= deadline) return null;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+// Read the queue without consuming it (for a UI to poll results). `start` lets
+// a caller fetch only what it has not seen; re-reading from 0 each time made a
+// streaming response cost O(n^2) in transfer and JSON parsing as it grew.
+export async function queueRange<T = unknown>(key: string, start = 0): Promise<T[]> {
+  if (relayBackedByRedis) {
+    const raw = (await redis(["LRANGE", key, start, -1])) as string[] | null;
     return (raw ?? []).map((r: string) => JSON.parse(r) as T);
   }
   const list = lists.get(key);
   if (!list || !alive(list.expiresAt)) return [];
-  return list.items.map((r: string) => JSON.parse(r) as T);
+  return list.items.slice(start).map((r: string) => JSON.parse(r) as T);
+}
+
+// Current queue length, so a poller can detect new entries without pulling them.
+export async function queueLength(key: string): Promise<number> {
+  if (relayBackedByRedis) {
+    return Number((await redis(["LLEN", key])) ?? 0);
+  }
+  const list = lists.get(key);
+  if (!list || !alive(list.expiresAt)) return 0;
+  return list.items.length;
 }
 
 export function newCode(length = 6) {
