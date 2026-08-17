@@ -1167,11 +1167,37 @@ export async function startAgent(options = {}) {
   const heartbeatTimer = setInterval(heartbeat, 10_000);
   heartbeatTimer.unref?.();
 
+  // Model output arrives as a stream of small deltas. Posting each one cost a
+  // relay invocation plus several Redis round trips per token, which dominated
+  // this project's usage. Buffer instead, and flush on a short timer, on a full
+  // batch, or immediately when a job reaches a terminal event so nothing that
+  // ends a run is ever left waiting on a timer.
+  const FLUSH_AFTER_MS = 200;
+  const MAX_BATCH = 128;
+  const TERMINAL = new Set(["done", "error", "result"]);
+
   let writeChain = Promise.resolve();
-  const emit = (jobId, type, text = "", data) => {
+  let pending = [];
+  let flushTimer = null;
+
+  const flush = () => {
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    if (pending.length === 0) return writeChain;
+    const events = pending;
+    pending = [];
     writeChain = writeChain
-      .then(() => post(relay, "/api/agent/result", { token, jobId, type, text, data }))
-      .catch((error) => log("could not deliver an event:", error.message));
+      .then(() => post(relay, "/api/agent/result", { token, events }))
+      .catch((error) => log("could not deliver events:", error.message));
+    return writeChain;
+  };
+
+  const emit = (jobId, type, text = "", data) => {
+    pending.push({ jobId, type, text, data });
+    if (TERMINAL.has(type) || pending.length >= MAX_BATCH) return flush();
+    if (!flushTimer) {
+      flushTimer = setTimeout(flush, FLUSH_AFTER_MS);
+      flushTimer.unref?.();
+    }
     return writeChain;
   };
   const context = {
@@ -1236,6 +1262,8 @@ export async function startAgent(options = {}) {
     }
   } finally {
     clearInterval(heartbeatTimer);
+    // Never strand buffered events when the loop exits.
+    await flush().catch(() => {});
   }
 }
 

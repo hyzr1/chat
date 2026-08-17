@@ -7,9 +7,16 @@ export const dynamic = "force-dynamic";
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-// 250 ms is still well below the threshold where token streaming looks chunky,
-// but it is 2.5x fewer round trips than the old 100 ms tick.
-const IDLE_TICK_MS = 250;
+// 400 ms is still well below the threshold where token streaming looks chunky,
+// and the launcher now batches its deltas on a 200 ms timer anyway, so a finer
+// tick here would find nothing new.
+const IDLE_TICK_MS = 400;
+
+// How long to hold an idle poll open before answering "nothing yet". Every
+// return trip is a fresh browser request and a fresh function invocation, so a
+// longer hold means proportionally fewer of both. The wait itself is idle, and
+// idle time is not billed as active CPU.
+const HOLD_OPEN_MS = 5_000;
 
 // The hosted UI polls a job's result stream, passing a cursor so it only
 // receives new events each time. A short server-side wait prevents visible
@@ -26,7 +33,7 @@ export async function GET(request: NextRequest) {
   if (!await ownsAgentJob(request, jobId)) return NextResponse.json({ error: "Run not found." }, { status: 404 });
 
   const key = `results:${jobId}`;
-  const deadline = Date.now() + 1400;
+  const deadline = Date.now() + HOLD_OPEN_MS;
   let total = await queueLength(key);
   while (total <= cursor && Date.now() < deadline) {
     await wait(IDLE_TICK_MS);

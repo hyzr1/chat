@@ -55,6 +55,12 @@ export async function getAgentRecord(token: string) {
   return await kvGet<AgentRecord>(`agent:${token}`);
 }
 
+// How stale lastSeen may get before a write is worth doing. Liveness is judged
+// against AGENT_ONLINE_WINDOW_MS (30s), so refreshing every 5s keeps a healthy
+// margin. Without this, every streamed event rewrote the whole record — during
+// a long response that was thousands of pointless writes to say "still alive".
+const TOUCH_INTERVAL_MS = 5_000;
+
 // Every authenticated request repairs both sides of the pairing. This makes a
 // Redis eviction, stale browser cookie, or interrupted deployment recover on
 // the next heartbeat without asking the user to pair again.
@@ -63,6 +69,12 @@ export async function touchAgent(token: string, existing?: AgentRecord | null) {
   if (!record || record.revokedAt) return null;
   const now = Date.now();
   const shouldCheckLink = Boolean(record.accountId) && now - Number(record.linkCheckedAt || 0) >= 30_000;
+
+  // Skip the write when lastSeen is already recent and nothing else is due.
+  if (!shouldCheckLink && now - Number(record.lastSeen || 0) < TOUCH_INTERVAL_MS) {
+    return record;
+  }
+
   const touched = { ...record, lastSeen: now, linkCheckedAt: shouldCheckLink ? now : record.linkCheckedAt };
   await kvSet(`agent:${token}`, touched, AGENT_RECORD_TTL_SECONDS);
   if (record.accountId && shouldCheckLink) {
