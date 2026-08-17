@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+import { isHostedRuntime } from "./agent-protocol";
 import {
   claimBenchmarkJob,
   finishBenchmarkJob,
@@ -279,13 +280,27 @@ async function waitForWork(milliseconds: number, worker: BenchmarkWorkerHandle) 
   });
 }
 
+// See the matching note in durable-worker.ts: when hosted, wind the loop down
+// once the queue has been quiet, instead of polling forever in a warm instance.
+// wakeBenchmarkWorker() starts a fresh loop whenever a benchmark is queued.
+const HOSTED_IDLE_SHUTDOWN_MS = 30_000;
+
 async function loop(worker: BenchmarkWorkerHandle) {
   recoverExpiredBenchmarkJobs();
+  const hosted = isHostedRuntime();
+  let lastWork = Date.now();
   while (worker.running && runtime.__hyzrBenchmarkWorker === worker) {
     const job = claimBenchmarkJob(workerId);
-    if (!job) { await waitForWork(1200, worker); continue; }
+    if (!job) {
+      if (hosted && Date.now() - lastWork >= HOSTED_IDLE_SHUTDOWN_MS) break;
+      await waitForWork(1200, worker);
+      continue;
+    }
     await executeBenchmarkJob(job as BenchmarkJob<BenchmarkReport>);
+    lastWork = Date.now();
   }
+  worker.running = false;
+  if (runtime.__hyzrBenchmarkWorker === worker) runtime.__hyzrBenchmarkWorker = undefined;
 }
 
 export function ensureBenchmarkWorker() {
