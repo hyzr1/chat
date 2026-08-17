@@ -1,4 +1,5 @@
 import os from "os";
+import { isHostedRuntime } from "./agent-protocol";
 import { claimDurableJob, finishDurableJob, heartbeatDurableJob, recoverExpiredJobs, retryDurableJob, type DurableJob } from "./durable-jobs";
 import { executeChatJob, type ChatJobPayload } from "./execution-engine";
 import { appendRunEvent, finishRun, getRun } from "./run-registry";
@@ -42,13 +43,30 @@ async function processJob(job: DurableJob<ChatJobPayload>) {
   }
 }
 
+// When hosted, a loop that has found no work for this long shuts itself down
+// rather than polling forever in a warm instance. Anything that enqueues work
+// calls wakeDurableWorker(), which starts a fresh loop, so the only cost is one
+// extra tick of latency on the first job after a quiet spell. Local installs
+// keep the always-on worker, where the durable store is real and on disk.
+const HOSTED_IDLE_SHUTDOWN_MS = 30_000;
+
 async function loop(worker: WorkerHandle) {
   recoverExpiredJobs();
+  const hosted = isHostedRuntime();
+  let lastWork = Date.now();
   while (worker.running && state.__hyzrChatWorker === worker) {
     const job = claimDurableJob<ChatJobPayload>(workerId);
-    if (!job) { await waitForWork(1000, worker); continue; }
+    if (!job) {
+      if (hosted && Date.now() - lastWork >= HOSTED_IDLE_SHUTDOWN_MS) break;
+      await waitForWork(1000, worker);
+      continue;
+    }
     await processJob(job);
+    lastWork = Date.now();
   }
+  worker.running = false;
+  // Clear the handle so the next ensureDurableWorker() starts a fresh loop.
+  if (state.__hyzrChatWorker === worker) state.__hyzrChatWorker = undefined;
 }
 
 export function ensureDurableWorker() {
