@@ -1162,7 +1162,9 @@ export async function startAgent(options = {}) {
     finally { heartbeatBusy = false; }
   };
   await heartbeat();
-  const heartbeatTimer = setInterval(heartbeat, 2_000);
+  // Ten seconds against the relay's 30s online window: three beats of slack,
+  // and 5x fewer relay invocations than the old 2s tick.
+  const heartbeatTimer = setInterval(heartbeat, 10_000);
   heartbeatTimer.unref?.();
 
   let writeChain = Promise.resolve();

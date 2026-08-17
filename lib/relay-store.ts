@@ -86,15 +86,49 @@ export async function queuePop<T = unknown>(key: string): Promise<T | null> {
   return JSON.parse(raw) as T;
 }
 
-// Read the whole queue without consuming (for a UI to poll results).
-export async function queueRange<T = unknown>(key: string): Promise<T[]> {
+// Blocking pop. Redis parks the connection server-side and answers the instant
+// a job lands, so one HTTPS round trip covers the whole wait window. The old
+// approach — LPOP on a 700 ms timer — spent ~11 round trips per long-poll and
+// billed every one of them as active CPU, which is what pinned this project at
+// the top of the usage report. Blocking here is idle wait, not compute.
+export async function queuePopBlocking<T = unknown>(key: string, timeoutSeconds: number): Promise<T | null> {
   if (relayBackedByRedis) {
-    const raw = (await redis(["LRANGE", key, 0, -1])) as string[] | null;
+    // BLPOP answers [key, value] on success and null when the timeout expires.
+    const raw = (await redis(["BLPOP", key, timeoutSeconds])) as [string, string] | null;
+    if (!raw) return null;
+    return JSON.parse(raw[1]) as T;
+  }
+  // In-process fallback keeps the local dev path working without Upstash.
+  const deadline = now() + timeoutSeconds * 1000;
+  for (;;) {
+    const popped = await queuePop<T>(key);
+    if (popped !== null) return popped;
+    if (now() >= deadline) return null;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+// Read the queue without consuming it (for a UI to poll results). `start` lets
+// a caller fetch only what it has not seen; re-reading from 0 each time made a
+// streaming response cost O(n^2) in transfer and JSON parsing as it grew.
+export async function queueRange<T = unknown>(key: string, start = 0): Promise<T[]> {
+  if (relayBackedByRedis) {
+    const raw = (await redis(["LRANGE", key, start, -1])) as string[] | null;
     return (raw ?? []).map((r: string) => JSON.parse(r) as T);
   }
   const list = lists.get(key);
   if (!list || !alive(list.expiresAt)) return [];
-  return list.items.map((r: string) => JSON.parse(r) as T);
+  return list.items.slice(start).map((r: string) => JSON.parse(r) as T);
+}
+
+// Current queue length, so a poller can detect new entries without pulling them.
+export async function queueLength(key: string): Promise<number> {
+  if (relayBackedByRedis) {
+    return Number((await redis(["LLEN", key])) ?? 0);
+  }
+  const list = lists.get(key);
+  if (!list || !alive(list.expiresAt)) return 0;
+  return list.items.length;
 }
 
 export function newCode(length = 6) {

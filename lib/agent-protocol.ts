@@ -1,8 +1,12 @@
 export const AGENT_PROTOCOL_VERSION = 3;
-// The current launcher heartbeats every two seconds. A closed or killed
-// terminal must never look connected for a full minute; three missed beats is
-// enough to mark it offline while tolerating a brief network hiccup.
-export const AGENT_ONLINE_WINDOW_MS = 6_500;
+// The launcher heartbeats every ten seconds; three missed beats marks it
+// offline, which still tolerates a brief network hiccup.
+//
+// This was 6.5s to match a 2s heartbeat, but that meant ~43,000 invocations a
+// day per paired machine — each one a Redis read plus write — for what is only
+// a liveness dot. Ten seconds cuts that by 5x. Older launchers beat faster than
+// required, which stays correct against a wider window.
+export const AGENT_ONLINE_WINDOW_MS = 30_000;
 
 export type AgentEngine = "claude" | "codex";
 export type AgentPermissionMode = "workspace" | "full-access";
